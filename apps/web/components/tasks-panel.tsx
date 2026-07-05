@@ -57,15 +57,19 @@ export function TasksPanel() {
     "华星科技预算约8万元，采购周期预计30天，倾向本地部署，IT负责人重点关注数据不出域。"
   );
 
-  async function loadTasks() {
+  async function loadTasks(preferredTaskId?: string | null) {
     const result = await listTasks();
     setTasks(result.items);
+    const preferredTask = preferredTaskId
+      ? result.items.find((task) => task.id === preferredTaskId)
+      : null;
     const visibleItems =
       statusFilter === "all"
         ? result.items
         : result.items.filter((task) => task.status === statusFilter);
-    if (visibleItems[0]) {
-      const detail = await getTask(visibleItems[0].id);
+    const taskToSelect = preferredTask || visibleItems[0];
+    if (taskToSelect) {
+      const detail = await getTask(taskToSelect.id);
       setSelectedTask(detail.task);
       setEvents(detail.events);
       setAgentRuns(detail.agent_runs);
@@ -78,7 +82,11 @@ export function TasksPanel() {
   }
 
   useEffect(() => {
-    void loadTasks().catch((error) =>
+    const linkedTaskId = new URLSearchParams(window.location.search).get("task");
+    if (linkedTaskId) {
+      setStatusFilter("all");
+    }
+    void loadTasks(linkedTaskId).catch((error) =>
       setMessage(error instanceof Error ? error.message : "任务读取失败。")
     );
   }, []);
@@ -283,7 +291,9 @@ export function TasksPanel() {
             </button>
             <button
               className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700"
-              onClick={() => void loadTasks()}
+              onClick={() =>
+                void loadTasks(new URLSearchParams(window.location.search).get("task"))
+              }
             >
               <RefreshCcw size={15} />
               刷新
@@ -377,6 +387,7 @@ export function TasksPanel() {
           <div className="space-y-5">
             <div className="grid gap-3 md:grid-cols-2">
               {[
+                ["任务ID", selectedTask.id],
                 ["任务类型", selectedTask.type],
                 ["状态", statusLabels[selectedTask.status] || selectedTask.status],
                 ["主责Agent", selectedTask.command_protocol.primary_agent],
