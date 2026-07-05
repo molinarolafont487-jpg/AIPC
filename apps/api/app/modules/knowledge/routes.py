@@ -503,7 +503,8 @@ def ingest_document(document_id: str) -> dict:
 
 @router.get("/documents")
 def list_documents() -> dict:
-    return {"items": demo_documents, "total": len(demo_documents)}
+    items = sorted(demo_documents, key=lambda item: item["created_at"], reverse=True)
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/documents/{document_id}/chunks")

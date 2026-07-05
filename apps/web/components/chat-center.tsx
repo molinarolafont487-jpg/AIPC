@@ -18,6 +18,7 @@ import {
   createChatConversation,
   getChatConversation,
   listChatConversations,
+  saveChatToKnowledge,
   sendChatMessage,
   type ChatConversation,
   type ChatMessage,
@@ -36,7 +37,7 @@ const modeOptions: Array<{
 ];
 
 const agentOptions = ["老板助理", "运营助理", "销售助理", "知识库助理", "内容助理", "代码助理"];
-const datasetOptions = ["自动判断", "制造企业", "园区", "幻影自用"];
+const datasetOptions = ["自动判断", "制造企业", "园区", "幻影自用", "对话沉淀"];
 
 const defaultPrompt = "帮我分析一下华星科技这个客户有没有成交机会，并看看知识库里有没有类似案例。";
 
@@ -55,7 +56,9 @@ export function ChatCenter() {
   const [notice, setNotice] = useState("AI对话中心可以直接问模型，也可以一键转为任务。");
   const [loading, setLoading] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [savingKnowledge, setSavingKnowledge] = useState(false);
   const [lastTaskId, setLastTaskId] = useState<string | null>(null);
+  const [lastKnowledgeDocumentId, setLastKnowledgeDocumentId] = useState<string | null>(null);
 
   async function loadConversations(preferredId?: string) {
     const result = await listChatConversations();
@@ -82,6 +85,7 @@ export function ChatCenter() {
     setAgentName(result.conversation.agent_name || "销售助理");
     setDataset(result.conversation.dataset || "自动判断");
     setLastTaskId(result.conversation.last_task_id || null);
+    setLastKnowledgeDocumentId(result.conversation.last_knowledge_document_id || null);
   }
 
   async function handleNewConversation() {
@@ -97,6 +101,7 @@ export function ChatCenter() {
       setSelectedConversation(result.conversation);
       setMessages(result.messages);
       setLastTaskId(null);
+      setLastKnowledgeDocumentId(null);
       await loadConversations(result.conversation.id);
       setNotice("新对话已创建。");
     } catch (error) {
@@ -117,6 +122,8 @@ export function ChatCenter() {
     setSelectedConversation(result.conversation);
     setMessages(result.messages);
     setConversations((current) => [result.conversation, ...current]);
+    setLastTaskId(null);
+    setLastKnowledgeDocumentId(null);
     return result.conversation;
   }
 
@@ -136,6 +143,7 @@ export function ChatCenter() {
       setSelectedConversation(result.conversation);
       setMessages(result.messages);
       setInput("");
+      setLastKnowledgeDocumentId(result.conversation.last_knowledge_document_id || null);
       await loadConversations(result.conversation.id);
       setNotice(`已使用${modeLabel(mode)}生成回复，可继续追问或转为任务。`);
     } catch (error) {
@@ -154,12 +162,34 @@ export function ChatCenter() {
       setMessages(result.messages);
       setSelectedConversation(result.conversation);
       setLastTaskId(result.task_id);
+      setLastKnowledgeDocumentId(result.conversation.last_knowledge_document_id || null);
       await loadConversations(result.conversation.id);
       setNotice(`已生成任务卡：${result.task.title}，可进入任务中心确认执行。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "对话转任务失败。");
     } finally {
       setConverting(false);
+    }
+  }
+
+  async function handleSaveToKnowledge(messageId?: string) {
+    if (!selectedConversation) return;
+    setSavingKnowledge(true);
+    setNotice("正在保存对话结果到企业知识库...");
+    try {
+      const result = await saveChatToKnowledge(selectedConversation.id, {
+        message_id: messageId,
+        dataset: "对话沉淀"
+      });
+      setMessages(result.messages);
+      setSelectedConversation(result.conversation);
+      setLastKnowledgeDocumentId(result.document.id);
+      await loadConversations(result.conversation.id);
+      setNotice(`已保存到知识库：${result.document.name}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "对话保存到知识库失败。");
+    } finally {
+      setSavingKnowledge(false);
     }
   }
 
@@ -302,15 +332,27 @@ export function ChatCenter() {
                     {message.metadata.actions.map((action) => (
                       <button
                         className="inline-flex items-center gap-1 rounded-md border border-line px-2.5 py-1.5 text-xs text-slate-600 hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={converting}
+                        disabled={converting || savingKnowledge}
                         key={action.key}
-                        onClick={() =>
-                          action.key === "convert_task"
-                            ? void handleConvertToTask(message.id)
-                            : setNotice(`${action.label} 已记录为下一步动作，后续会接入正式执行。`)
-                        }
+                        onClick={() => {
+                          if (action.key === "convert_task") {
+                            void handleConvertToTask(message.id);
+                            return;
+                          }
+                          if (action.key === "save_knowledge") {
+                            void handleSaveToKnowledge(message.id);
+                            return;
+                          }
+                          setNotice(`${action.label} 已记录为下一步动作，后续会接入正式执行。`);
+                        }}
                       >
-                        {action.key === "convert_task" ? <FilePlus2 size={13} /> : <ArrowRight size={13} />}
+                        {action.key === "convert_task" ? (
+                          <FilePlus2 size={13} />
+                        ) : action.key === "save_knowledge" ? (
+                          <Database size={13} />
+                        ) : (
+                          <ArrowRight size={13} />
+                        )}
                         {action.label}
                       </button>
                     ))}
@@ -393,12 +435,31 @@ export function ChatCenter() {
           转为任务
         </button>
 
+        <button
+          className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!selectedConversation || !latestAssistant || savingKnowledge}
+          onClick={() => void handleSaveToKnowledge(latestAssistant?.id)}
+        >
+          <Database size={15} />
+          保存到知识库
+        </button>
+
         {lastTaskId ? (
           <Link
             className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
             href={`/tasks?task=${lastTaskId}`}
           >
             查看生成的任务
+            <ArrowRight size={15} />
+          </Link>
+        ) : null}
+
+        {lastKnowledgeDocumentId ? (
+          <Link
+            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
+            href={`/knowledge?doc=${lastKnowledgeDocumentId}`}
+          >
+            查看知识库沉淀
             <ArrowRight size={15} />
           </Link>
         ) : null}

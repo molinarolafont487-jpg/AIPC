@@ -13,7 +13,7 @@ import {
 } from "@/lib/api-client";
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
-const DATASET_OPTIONS = ["全部数据集", "制造企业", "园区", "幻影自用", "custom"];
+const DATASET_OPTIONS = ["全部数据集", "制造企业", "园区", "幻影自用", "对话沉淀", "custom"];
 
 export function KnowledgePanel() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -29,20 +29,29 @@ export function KnowledgePanel() {
   const [chunks, setChunks] = useState<SearchChunk[]>([]);
   const [message, setMessage] = useState("知识库助理用于检索资料并生成引用。");
 
-  async function loadDocuments() {
+  async function loadDocuments(preferredDocumentId?: string | null) {
     const result = await listDocuments();
     setDocuments(result.items);
-    if (result.items[0]) {
-      await selectDocument(result.items[0]);
+    const target = preferredDocumentId
+      ? result.items.find((document) => document.id === preferredDocumentId)
+      : result.items[0];
+    if (target) {
+      await selectDocument(target);
+      if (preferredDocumentId) {
+        setMessage(`已定位知识库文档：${target.name}`);
+      }
     } else {
       setSelectedDocument(null);
       setDocumentChunks([]);
+      if (preferredDocumentId) {
+        setMessage("没有找到指定的知识库文档，已显示最新文档列表。");
+      }
     }
   }
 
   useEffect(() => {
-    void loadDocuments()
-      .catch(() => setMessage("文档列表读取失败。"));
+    const linkedDocumentId = new URLSearchParams(window.location.search).get("doc");
+    void loadDocuments(linkedDocumentId).catch(() => setMessage("文档列表读取失败。"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -119,7 +128,7 @@ export function KnowledgePanel() {
             </button>
           </div>
 
-          <div className="mb-3 grid grid-cols-3 gap-2 text-center text-xs text-slate-500">
+          <div className="mb-3 grid grid-cols-2 gap-2 text-center text-xs text-slate-500 md:grid-cols-4">
             <div className="rounded-md bg-mist px-2 py-2">
               <div className="text-sm font-semibold text-ink">{documents.length}</div>
               <div>文档</div>
@@ -135,6 +144,12 @@ export function KnowledgePanel() {
                 {new Set(documents.map((document) => document.dataset)).size}
               </div>
               <div>资料包</div>
+            </div>
+            <div className="rounded-md bg-mist px-2 py-2">
+              <div className="text-sm font-semibold text-ink">
+                {documents.filter((document) => document.dataset === "对话沉淀").length}
+              </div>
+              <div>对话沉淀</div>
             </div>
           </div>
 

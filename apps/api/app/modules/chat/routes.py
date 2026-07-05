@@ -20,7 +20,11 @@ from app.core.demo_store import (
 )
 from app.core.schemas import CommandProtocol
 from app.modules.commands.routes import attach_knowledge_refs, infer_dataset_filter
-from app.modules.knowledge.routes import search_knowledge_refs
+from app.modules.knowledge.routes import (
+    CreateDocumentRequest,
+    search_knowledge_refs,
+    upsert_document,
+)
 from app.modules.tasks.routes import persist_task
 
 chat_router = APIRouter()
@@ -48,6 +52,12 @@ class SendMessageRequest(BaseModel):
 class ConvertToTaskRequest(BaseModel):
     message_id: str | None = None
     instruction: str | None = None
+
+
+class SaveToKnowledgeRequest(BaseModel):
+    message_id: str | None = None
+    dataset: str = "对话沉淀"
+    filename: str | None = None
 
 
 def estimate_tokens(text: str) -> int:
@@ -119,6 +129,44 @@ def create_message(
     }
     chat_messages.setdefault(conversation_id, []).append(message)
     return message
+
+
+def select_message_for_action(
+    conversation_id: str,
+    message_id: str | None,
+    preferred_role: str,
+) -> dict[str, Any]:
+    messages = chat_messages.get(conversation_id, [])
+    if message_id:
+        message = next((item for item in messages if item["id"] == message_id), None)
+        if message:
+            return message
+        raise HTTPException(status_code=404, detail="Message not found")
+    message = next(
+        (item for item in reversed(messages) if item["role"] == preferred_role),
+        None,
+    )
+    if message:
+        return message
+    raise HTTPException(
+        status_code=409,
+        detail=f"Conversation has no {preferred_role} message",
+    )
+
+
+def previous_user_message(
+    conversation_id: str,
+    before_message_id: str,
+) -> dict[str, Any] | None:
+    messages = chat_messages.get(conversation_id, [])
+    before_index = next(
+        (index for index, item in enumerate(messages) if item["id"] == before_message_id),
+        len(messages),
+    )
+    return next(
+        (item for item in reversed(messages[:before_index]) if item["role"] == "user"),
+        None,
+    )
 
 
 def summarize_refs(refs: list[dict[str, Any]]) -> str:
@@ -462,6 +510,79 @@ def convert_to_task(conversation_id: str, payload: ConvertToTaskRequest | None =
         "task_id": task["id"],
         "status": task["status"],
         "task": task,
+        "conversation": conversation,
+        "messages": chat_messages[conversation_id],
+    }
+
+
+@chat_router.post("/conversations/{conversation_id}/save-to-knowledge")
+def save_to_knowledge(
+    conversation_id: str,
+    payload: SaveToKnowledgeRequest | None = None,
+) -> dict:
+    request = payload or SaveToKnowledgeRequest()
+    conversation = chat_conversations.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    message = select_message_for_action(conversation_id, request.message_id, "assistant")
+    user_message = previous_user_message(conversation_id, message["id"])
+    filename = (
+        request.filename
+        or f"AI对话沉淀-{conversation['title'][:18]}-{message['id']}.md"
+    )
+    content_parts = [
+        f"# {conversation['title']}",
+        f"来源：AI对话中心 / {conversation_id}",
+        f"模式：{conversation.get('mode')}",
+        f"模型：{message.get('metadata', {}).get('model_name', conversation.get('model_key'))}",
+    ]
+    if user_message:
+        content_parts.extend(["", "## 用户问题", user_message["content"]])
+    content_parts.extend(["", "## AI回答", message["content"]])
+    refs = message.get("metadata", {}).get("knowledge_refs") or []
+    if refs:
+        content_parts.append("")
+        content_parts.append("## 引用资料")
+        content_parts.extend(
+            (
+                f"- {ref['document_name']} p.{ref['page_start']}-{ref['page_end']}："
+                f"{ref['excerpt'][:120]}"
+            )
+            for ref in refs
+        )
+
+    document = upsert_document(
+        CreateDocumentRequest(
+            filename=filename,
+            file_type="md",
+            dataset=request.dataset,
+            content="\n".join(content_parts),
+            metadata={
+                "source_type": "chat",
+                "conversation_id": conversation_id,
+                "message_id": message["id"],
+                "mode": conversation.get("mode"),
+                "model_key": conversation.get("model_key"),
+                "model_name": message.get("metadata", {}).get("model_name"),
+            },
+            auto_ingest=True,
+        )
+    )
+    conversation["last_knowledge_document_id"] = document["id"]
+    conversation["updated_at"] = utc_now()
+    create_message(
+        conversation_id,
+        "system",
+        f"已保存到企业知识库：{document['name']}。",
+        metadata={
+            "document_id": document["id"],
+            "dataset": request.dataset,
+            "action": "save_to_knowledge",
+        },
+    )
+    return {
+        "document": document,
         "conversation": conversation,
         "messages": chat_messages[conversation_id],
     }

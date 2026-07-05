@@ -209,6 +209,7 @@ export type ChatConversation = {
   model_key: string;
   dataset: string | null;
   last_task_id?: string;
+  last_knowledge_document_id?: string;
   created_at: string;
   updated_at: string;
 };
@@ -227,6 +228,7 @@ export type ChatMessage = {
     knowledge_refs?: KnowledgeReference[];
     actions?: Array<{ key: string; label: string }>;
     task_id?: string;
+    document_id?: string;
     action?: string;
     usage_id?: string;
   };
@@ -591,6 +593,28 @@ export async function convertChatToTask(
     task_id: string;
     status: string;
     task: Task;
+    conversation: ChatConversation;
+    messages: ChatMessage[];
+  };
+}
+
+export async function saveChatToKnowledge(
+  conversationId: string,
+  payload?: { message_id?: string; dataset?: string; filename?: string }
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/chat/conversations/${conversationId}/save-to-knowledge`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {})
+    }
+  );
+  if (!response.ok) {
+    throw new Error("对话保存到知识库失败。");
+  }
+  return (await response.json()) as {
+    document: DocumentItem;
     conversation: ChatConversation;
     messages: ChatMessage[];
   };
