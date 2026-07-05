@@ -84,6 +84,7 @@ export type Agent = {
   description: string;
   tools: string[];
   status: string;
+  prompt_config?: AgentRun["prompt_config"];
 };
 
 export type Task = {
@@ -106,6 +107,31 @@ export type TaskEvent = {
   actor_type: string;
   message: string;
   metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type AgentRun = {
+  id: string;
+  task_id: string;
+  agent_name: string;
+  agent_key: string;
+  execution_mode: "real" | "semi_auto";
+  status: string;
+  prompt_config: {
+    role_description: string;
+    duty_boundary: string;
+    available_sources: string[];
+    output_format: string[];
+    forbidden: string[];
+    requires_human_confirmation: boolean;
+  };
+  input_summary: {
+    task_title: string;
+    task_type: string;
+    knowledge_ref_count: number;
+  };
+  output: string;
+  artifacts: string[];
   created_at: string;
 };
 
@@ -249,7 +275,23 @@ export async function startTask(taskId: string) {
   if (!response.ok) {
     throw new Error("任务启动失败。");
   }
-  return (await response.json()) as { task_id: string; status: string };
+  return (await response.json()) as {
+    task_id: string;
+    status: string;
+    agent_runs: AgentRun[];
+  };
+}
+
+export async function dispatchTaskAgents(taskId: string, force = false) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/dispatch-agents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ force })
+  });
+  if (!response.ok) {
+    throw new Error("数字员工执行失败。");
+  }
+  return (await response.json()) as { task_id: string; agent_runs: AgentRun[] };
 }
 
 export async function listTasks() {
@@ -269,7 +311,11 @@ export async function getTask(taskId: string) {
   if (!response.ok) {
     throw new Error("无法读取任务详情。");
   }
-  return (await response.json()) as { task: Task; events: TaskEvent[] };
+  return (await response.json()) as {
+    task: Task;
+    events: TaskEvent[];
+    agent_runs: AgentRun[];
+  };
 }
 
 export async function listDocuments() {

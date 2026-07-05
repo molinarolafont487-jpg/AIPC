@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock3, RefreshCcw } from "lucide-react";
-import { getTask, listTasks, type Task, type TaskEvent } from "@/lib/api-client";
+import { Bot, Clock3, Play, RefreshCcw } from "lucide-react";
+import {
+  dispatchTaskAgents,
+  getTask,
+  listTasks,
+  type AgentRun,
+  type Task,
+  type TaskEvent
+} from "@/lib/api-client";
 
 const statusLabels: Record<string, string> = {
   pending_confirm: "待确认",
@@ -19,7 +26,9 @@ export function TasksPanel() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
   const [message, setMessage] = useState("任务中心会显示AI指挥台创建的任务。");
+  const [runningAgents, setRunningAgents] = useState(false);
 
   async function loadTasks() {
     const result = await listTasks();
@@ -28,9 +37,11 @@ export function TasksPanel() {
       const detail = await getTask(result.items[0].id);
       setSelectedTask(detail.task);
       setEvents(detail.events);
+      setAgentRuns(detail.agent_runs);
     } else {
       setSelectedTask(null);
       setEvents([]);
+      setAgentRuns([]);
     }
     setMessage(`已加载 ${result.total} 个任务。`);
   }
@@ -45,6 +56,25 @@ export function TasksPanel() {
     const detail = await getTask(taskId);
     setSelectedTask(detail.task);
     setEvents(detail.events);
+    setAgentRuns(detail.agent_runs);
+  }
+
+  async function runAgents(force = false) {
+    if (!selectedTask) return;
+    setRunningAgents(true);
+    setMessage("正在执行数字员工 Prompt...");
+    try {
+      const result = await dispatchTaskAgents(selectedTask.id, force);
+      const detail = await getTask(result.task_id);
+      setSelectedTask(detail.task);
+      setEvents(detail.events);
+      setAgentRuns(detail.agent_runs);
+      setMessage(`已生成 ${result.agent_runs.length} 个数字员工输出。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "数字员工执行失败。");
+    } finally {
+      setRunningAgents(false);
+    }
   }
 
   return (
@@ -139,6 +169,62 @@ export function TasksPanel() {
               ) : (
                 <p className="text-sm text-slate-500">
                   该任务尚未关联知识库引用。
+                </p>
+              )}
+            </div>
+
+            <div className="rounded-md border border-line p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Bot size={17} className="text-accent" />
+                  <h3 className="text-sm font-semibold">数字员工输出</h3>
+                  <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                    {agentRuns.length} 个
+                  </span>
+                </div>
+                <button
+                  className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={runningAgents}
+                  onClick={() => void runAgents(agentRuns.length > 0)}
+                >
+                  <Play size={15} />
+                  {agentRuns.length > 0 ? "重新执行" : "执行数字员工"}
+                </button>
+              </div>
+
+              {agentRuns.length ? (
+                <div className="space-y-3">
+                  {agentRuns.map((run) => (
+                    <article className="rounded-md bg-mist p-4" key={run.id}>
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold">{run.agent_name}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {run.execution_mode === "real" ? "真执行" : "半自动"} /{" "}
+                            {run.status} / 引用 {run.input_summary.knowledge_ref_count} 条
+                          </div>
+                        </div>
+                        <span className="rounded bg-white px-2 py-1 text-xs text-slate-600">
+                          {run.artifacts.join("、")}
+                        </span>
+                      </div>
+                      <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                        {run.output}
+                      </p>
+                      <div className="mt-3 rounded-md bg-white p-3 text-xs leading-5 text-slate-500">
+                        <div>岗位：{run.prompt_config.role_description}</div>
+                        <div>边界：{run.prompt_config.duty_boundary}</div>
+                        <div>
+                          人工确认：
+                          {run.prompt_config.requires_human_confirmation ? "需要" : "不需要"}
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm leading-6 text-slate-500">
+                  点击“执行数字员工”后，将按任务卡分配主责与协作数字员工，并由老板助理生成确认版。
                 </p>
               )}
             </div>

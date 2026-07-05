@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core.agent_runtime import dispatch_task_agents
 from app.core.demo_store import (
     ADMIN_USER_ID,
     WORKSPACE_ID,
     add_task_event,
+    agent_runs,
     agents,
     new_id,
     task_events,
@@ -26,6 +28,10 @@ class UpdateTaskProtocolRequest(BaseModel):
 
 class DecisionRequest(BaseModel):
     comment: str | None = None
+
+
+class DispatchAgentsRequest(BaseModel):
+    force: bool = False
 
 
 def find_agent_id_by_name(name: str) -> str | None:
@@ -82,7 +88,11 @@ def get_task(task_id: str) -> dict:
     task = tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    return {"task": task, "events": task_events.get(task_id, [])}
+    return {
+        "task": task,
+        "events": task_events.get(task_id, []),
+        "agent_runs": agent_runs.get(task_id, []),
+    }
 
 
 @router.patch("/{task_id}/command-protocol")
@@ -101,6 +111,7 @@ def update_task_protocol(task_id: str, payload: UpdateTaskProtocolRequest) -> di
     task["primary_agent_id"] = find_agent_id_by_name(protocol["primary_agent"])
     task["approval_required"] = protocol["approval_required"]
     task["updated_at"] = utc_now()
+    agent_runs.pop(task_id, None)
     add_task_event(task_id, "task.updated", "任务卡字段已修改。", actor_type="user")
     return {"task_id": task_id, "status": task["status"], "task": task}
 
@@ -126,10 +137,18 @@ def start_task(task_id: str) -> dict:
     task = tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    task["status"] = "waiting_human"
+    task["status"] = (
+        "waiting_human"
+        if task["command_protocol"].get("human_collaborators")
+        else "waiting_approval"
+    )
     task["updated_at"] = utc_now()
     knowledge_refs = task["command_protocol"].get("knowledge_refs", [])
-    add_task_event(task_id, "agent.started", "销售助理开始执行客户跟进任务。")
+    existing_runs = agent_runs.get(task_id, [])
+    runs = dispatch_task_agents(task, existing_runs=existing_runs)
+    agent_runs[task_id] = runs
+    agent_names = "、".join(run["agent_name"] for run in runs)
+    add_task_event(task_id, "agent.started", f"已分配数字员工执行：{agent_names}。")
     add_task_event(
         task_id,
         "tool.called",
@@ -140,8 +159,47 @@ def start_task(task_id: str) -> dict:
         ),
         metadata={"knowledge_refs": knowledge_refs},
     )
-    add_task_event(task_id, "feishu.pending", "等待销售小张在飞书补充预算。")
-    return {"task_id": task_id, "status": task["status"]}
+    add_task_event(
+        task_id,
+        "agents.completed",
+        f"{len(runs)} 个数字员工已输出阶段结果，老板助理已生成确认版。",
+        metadata={"agent_run_ids": [run["id"] for run in runs]},
+    )
+    if task["status"] == "waiting_human":
+        add_task_event(task_id, "feishu.pending", "等待销售小张在飞书补充预算。")
+    else:
+        add_task_event(task_id, "approval.pending", "等待老板确认数字员工汇总结果。")
+    return {"task_id": task_id, "status": task["status"], "agent_runs": runs}
+
+
+@router.post("/{task_id}/dispatch-agents")
+def dispatch_agents(task_id: str, payload: DispatchAgentsRequest | None = None) -> dict:
+    task = tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    force = payload.force if payload else False
+    runs = dispatch_task_agents(
+        task,
+        existing_runs=agent_runs.get(task_id, []),
+        force=force,
+    )
+    agent_runs[task_id] = runs
+    task["updated_at"] = utc_now()
+    add_task_event(
+        task_id,
+        "agents.dispatched",
+        f"已{'重新' if force else ''}执行 {len(runs)} 个数字员工 Prompt。",
+        metadata={"agent_run_ids": [run["id"] for run in runs]},
+    )
+    return {"task_id": task_id, "agent_runs": runs}
+
+
+@router.get("/{task_id}/agent-runs")
+def list_agent_runs(task_id: str) -> dict:
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    runs = agent_runs.get(task_id, [])
+    return {"items": runs, "total": len(runs)}
 
 
 @router.post("/{task_id}/approve")

@@ -57,6 +57,16 @@ export function AgentsPanel() {
                   </span>
                 ))}
               </div>
+              {agent.prompt_config ? (
+                <div className="mt-3 rounded-md bg-mist p-3 text-xs leading-5 text-slate-600">
+                  <div>岗位：{agent.prompt_config.role_description}</div>
+                  <div>边界：{agent.prompt_config.duty_boundary}</div>
+                  <div>
+                    人工确认：
+                    {agent.prompt_config.requires_human_confirmation ? "需要" : "不需要"}
+                  </div>
+                </div>
+              ) : null}
             </article>
           ))}
         </div>
@@ -64,4 +74,3 @@ export function AgentsPanel() {
     </div>
   );
 }
-
