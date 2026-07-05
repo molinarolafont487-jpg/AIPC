@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://phantom.local/schemas/command-protocol.schema.json",
+  "title": "Command Protocol",
+  "type": "object",
+  "required": [
+    "task_title",
+    "task_goal",
+    "task_type",
+    "primary_agent",
+    "collaborating_agents",
+    "human_collaborators",
+    "input_sources",
+    "expected_outputs",
+    "deadline",
+    "approval_required",
+    "risk_level",
+    "notification_channel",
+    "archive_location"
+  ],
+  "properties": {
+    "task_title": { "type": "string", "minLength": 1 },
+    "task_goal": { "type": "string", "minLength": 1 },
+    "task_type": {
+      "type": "string",
+      "enum": [
+        "经营汇总",
+        "任务拆解",
+        "客户跟进",
+        "资料检索",
+        "内容生成",
+        "代码原型",
+        "会议纪要",
+        "多员工协同"
+      ]
+    },
+    "primary_agent": { "type": "string", "minLength": 1 },
+    "collaborating_agents": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "human_collaborators": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "input_sources": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "expected_outputs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "deadline": { "type": "string" },
+    "approval_required": { "type": "boolean" },
+    "risk_level": { "type": "string", "enum": ["low", "medium", "high"] },
+    "notification_channel": { "type": "string", "enum": ["飞书"] },
+    "archive_location": { "type": "string" }
+  },
+  "additionalProperties": false
+}
+

@@ -1,0 +1,11 @@
+[project]
+name = "phantom-worker"
+version = "0.1.0"
+description = "Worker pipelines for Phantom AI Workstation MVP."
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.9.2",
+  "redis>=5.2.0",
+  "httpx>=0.27.2"
+]
+

@@ -1,0 +1,10 @@
+{
+  "input": "帮我准备明天下午给华星科技的合作方案，让销售小张补充预算，销售助理生成话术，内容助理生成PPT大纲。",
+  "expected": {
+    "task_title": "华星科技合作方案准备",
+    "task_type": "客户跟进",
+    "primary_agent": "销售助理",
+    "notification_channel": "飞书"
+  }
+}
+

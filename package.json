@@ -1,0 +1,19 @@
+{
+  "name": "phantom-ai-workstation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phantom AI Workstation 7-day MVP monorepo.",
+  "scripts": {
+    "dev": "pnpm --parallel dev",
+    "dev:web": "pnpm --filter @phantom/web dev",
+    "dev:api": ".venv/bin/uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir apps/api",
+    "typecheck": "pnpm --filter @phantom/web typecheck",
+    "lint": "pnpm --filter @phantom/web lint",
+    "test": "pnpm typecheck"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}
