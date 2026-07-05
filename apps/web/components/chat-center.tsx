@@ -42,7 +42,16 @@ const modeOptions: Array<{
 ];
 
 const agentOptions = ["老板助理", "运营助理", "销售助理", "知识库助理", "内容助理", "代码助理"];
-const datasetOptions = ["自动判断", "制造企业", "园区", "幻影自用", "对话沉淀", "任务归档", "custom"];
+const datasetOptions = [
+  "自动判断",
+  "制造企业",
+  "企业信息资料",
+  "园区",
+  "幻影自用",
+  "对话沉淀",
+  "任务归档",
+  "custom"
+];
 
 const defaultPrompt = "帮我分析一下华星科技这个客户有没有成交机会，并看看知识库里有没有类似案例。";
 

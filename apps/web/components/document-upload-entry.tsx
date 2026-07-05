@@ -8,13 +8,23 @@ import {
   type DocumentItem
 } from "@/lib/api-client";
 
-const DATASET_OPTIONS = ["制造企业", "园区", "幻影自用", "对话沉淀", "任务归档", "custom"];
+const DATASET_OPTIONS = [
+  "制造企业",
+  "企业信息资料",
+  "园区",
+  "幻影自用",
+  "对话沉淀",
+  "任务归档",
+  "custom"
+];
 const ACCEPTED_TYPES = ".txt,.md,.csv,.json,.html,.docx,.pptx,.xlsx,.pdf";
 
 type DocumentUploadEntryProps = {
   defaultDataset?: string;
-  sourceEntry: "command_center" | "chat_center";
+  sourceEntry: "command_center" | "chat_center" | "knowledge_center";
   compact?: boolean;
+  title?: string;
+  idleMessage?: string;
   onUploaded?: (document: DocumentItem) => void;
 };
 
@@ -39,6 +49,8 @@ export function DocumentUploadEntry({
   defaultDataset = "制造企业",
   sourceEntry,
   compact = false,
+  title = "上传完整文档",
+  idleMessage = "选择文件后入库。",
   onUploaded
 }: DocumentUploadEntryProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -46,7 +58,7 @@ export function DocumentUploadEntry({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadedDocument, setUploadedDocument] = useState<DocumentItem | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [message, setMessage] = useState("选择文件后入库。");
+  const [message, setMessage] = useState(idleMessage);
 
   async function handleUpload() {
     if (!selectedFile) {
@@ -86,7 +98,7 @@ export function DocumentUploadEntry({
         <div className="flex items-center gap-2">
           <FileUp size={18} className="text-accent" />
           <div>
-            <h2 className="text-base font-semibold">上传完整文档</h2>
+            <h2 className="text-base font-semibold">{title}</h2>
             <p className="mt-1 text-xs text-slate-500">{message}</p>
           </div>
         </div>
@@ -104,7 +116,7 @@ export function DocumentUploadEntry({
           const file = event.target.files?.[0] || null;
           setSelectedFile(file);
           setUploadedDocument(null);
-          setMessage(file ? `${file.name} / ${formatFileSize(file.size)}` : "选择文件后入库。");
+          setMessage(file ? `${file.name} / ${formatFileSize(file.size)}` : idleMessage);
         }}
       />
 

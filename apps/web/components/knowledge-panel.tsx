@@ -19,9 +19,19 @@ import {
   type DocumentChunk,
   type DocumentItem
 } from "@/lib/api-client";
+import { DocumentUploadEntry } from "@/components/document-upload-entry";
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
-const DATASET_OPTIONS = ["全部数据集", "制造企业", "园区", "幻影自用", "对话沉淀", "任务归档", "custom"];
+const DATASET_OPTIONS = [
+  "全部数据集",
+  "制造企业",
+  "企业信息资料",
+  "园区",
+  "幻影自用",
+  "对话沉淀",
+  "任务归档",
+  "custom"
+];
 
 export function KnowledgePanel() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -105,6 +115,17 @@ export function KnowledgePanel() {
     }
   }
 
+  async function handleUploadedDocument(document: DocumentItem) {
+    await loadDocuments(document.id);
+    setDataset(document.dataset || "企业信息资料");
+    setSearchDataset(document.dataset || "全部数据集");
+    setQuery(`总结《${document.name}》的企业信息、关键事实、风险点和可执行任务。`);
+    setTaskCommand(
+      `基于《${document.name}》生成企业信息梳理任务，让知识库助理提炼关键信息，运营助理拆解后续待办，老板助理汇总确认事项。`
+    );
+    setMessage(`企业资料已导入：${document.name}，可立即检索引用或生成任务卡。`);
+  }
+
   async function handleSearch() {
     setMessage("正在检索知识库...");
     try {
@@ -142,6 +163,16 @@ export function KnowledgePanel() {
   return (
     <div className="grid gap-5 p-5 xl:grid-cols-[430px_1fr]">
       <div className="space-y-5">
+        <DocumentUploadEntry
+          defaultDataset="企业信息资料"
+          idleMessage="支持 Word / PDF / PPT / Excel / Markdown / TXT，导入后自动解析为可引用片段。"
+          sourceEntry="knowledge_center"
+          title="导入企业信息资料"
+          onUploaded={(document) => {
+            void handleUploadedDocument(document);
+          }}
+        />
+
         <section className="rounded-lg border border-line bg-white p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
