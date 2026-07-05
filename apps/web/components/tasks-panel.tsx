@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import {
   Archive,
+  BarChart3,
   Bot,
   CheckCircle2,
   Clock3,
+  ListFilter,
   MessageCircle,
   Play,
   RefreshCcw,
@@ -42,6 +44,7 @@ export function TasksPanel() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+  const [statusFilter, setStatusFilter] = useState("all");
   const [message, setMessage] = useState("任务中心会显示AI指挥台创建的任务。");
   const [runningAgents, setRunningAgents] = useState(false);
   const [feishuLoading, setFeishuLoading] = useState(false);
@@ -57,8 +60,12 @@ export function TasksPanel() {
   async function loadTasks() {
     const result = await listTasks();
     setTasks(result.items);
-    if (result.items[0]) {
-      const detail = await getTask(result.items[0].id);
+    const visibleItems =
+      statusFilter === "all"
+        ? result.items
+        : result.items.filter((task) => task.status === statusFilter);
+    if (visibleItems[0]) {
+      const detail = await getTask(visibleItems[0].id);
       setSelectedTask(detail.task);
       setEvents(detail.events);
       setAgentRuns(detail.agent_runs);
@@ -81,6 +88,19 @@ export function TasksPanel() {
     setSelectedTask(detail.task);
     setEvents(detail.events);
     setAgentRuns(detail.agent_runs);
+  }
+
+  async function handleStatusFilterChange(nextStatus: string) {
+    setStatusFilter(nextStatus);
+    const visibleItems =
+      nextStatus === "all" ? tasks : tasks.filter((task) => task.status === nextStatus);
+    if (visibleItems[0]) {
+      await selectTask(visibleItems[0].id);
+    } else {
+      setSelectedTask(null);
+      setEvents([]);
+      setAgentRuns([]);
+    }
   }
 
   async function refreshSelectedTask(taskId: string) {
@@ -186,6 +206,7 @@ export function TasksPanel() {
     setMessage("正在跑完整黄金Demo闭环...");
     try {
       const result = await runGoldenDemoLoop({ auto_archive: true });
+      setStatusFilter("all");
       setSelectedTask(result.task);
       setEvents(result.events);
       setAgentRuns(result.agent_runs);
@@ -203,6 +224,31 @@ export function TasksPanel() {
   const canApprove =
     selectedTask !== null && selectedTask.status !== "completed" && selectedTask.status !== "archived";
   const canArchive = selectedTask?.status === "completed";
+  const statusCounts = tasks.reduce<Record<string, number>>(
+    (counts, task) => {
+      counts[task.status] = (counts[task.status] || 0) + 1;
+      return counts;
+    },
+    {}
+  );
+  const filteredTasks =
+    statusFilter === "all" ? tasks : tasks.filter((task) => task.status === statusFilter);
+  const activeTaskCount =
+    (statusCounts.pending_confirm || 0) +
+    (statusCounts.running || 0) +
+    (statusCounts.waiting_human || 0) +
+    (statusCounts.waiting_approval || 0);
+  const closedLoopCount = statusCounts.archived || 0;
+  const archiveRate = tasks.length ? Math.round((closedLoopCount / tasks.length) * 100) : 0;
+  const statusFilters = [
+    ["all", "全部", tasks.length],
+    ["pending_confirm", "待确认", statusCounts.pending_confirm || 0],
+    ["running", "执行中", statusCounts.running || 0],
+    ["waiting_human", "等真人", statusCounts.waiting_human || 0],
+    ["waiting_approval", "等老板", statusCounts.waiting_approval || 0],
+    ["completed", "已完成", statusCounts.completed || 0],
+    ["archived", "已归档", statusCounts.archived || 0]
+  ];
   const closureSteps = [
     {
       label: "飞书回流",
@@ -245,13 +291,62 @@ export function TasksPanel() {
           </div>
         </div>
 
+        <div className="mb-4 grid gap-2 sm:grid-cols-3">
+          {[
+            ["活跃任务", activeTaskCount],
+            ["已归档", closedLoopCount],
+            ["闭环率", `${archiveRate}%`]
+          ].map(([label, value]) => (
+            <div className="rounded-md border border-line bg-mist p-3" key={label}>
+              <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
+                <BarChart3 size={13} />
+                {label}
+              </div>
+              <div className="text-lg font-semibold">{value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mb-4 rounded-md border border-line p-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-slate-500">
+            <ListFilter size={14} />
+            状态筛选
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {statusFilters.map(([status, label, count]) => (
+              <button
+                className={`inline-flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs ${
+                  statusFilter === status
+                    ? "bg-ink text-white"
+                    : "bg-mist text-slate-600 hover:bg-[#e9f6f5] hover:text-accent"
+                }`}
+                key={status}
+                onClick={() => void handleStatusFilterChange(String(status))}
+              >
+                <span>{label}</span>
+                <span
+                  className={`rounded px-1.5 py-0.5 ${
+                    statusFilter === status ? "bg-white/15" : "bg-white"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="space-y-3">
           {tasks.length === 0 ? (
             <div className="rounded-md bg-mist p-4 text-sm leading-6 text-slate-600">
               暂无任务。请先回到 AI指挥台，点击“生成任务卡”并“确认执行”。
             </div>
+          ) : filteredTasks.length === 0 ? (
+            <div className="rounded-md bg-mist p-4 text-sm leading-6 text-slate-600">
+              当前筛选下暂无任务。
+            </div>
           ) : (
-            tasks.map((task) => (
+            filteredTasks.map((task) => (
               <button
                 className={`w-full rounded-md border p-4 text-left ${
                   selectedTask?.id === task.id
