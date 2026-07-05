@@ -163,6 +163,89 @@ def archive_task_result(task: dict) -> None:
     add_task_event(task["id"], "task.archived", "任务已归档到任务中心。")
 
 
+def build_task_result_package(task_id: str) -> dict:
+    task = tasks[task_id]
+    runs = agent_runs.get(task_id, [])
+    refs = task["command_protocol"].get("knowledge_refs", [])
+    events = task_events.get(task_id, [])
+    feedback = task.get("human_feedback", [])
+    source_names = list(dict.fromkeys(ref["document_name"] for ref in refs))
+    boss_run = next(
+        (run for run in reversed(runs) if run["agent_name"] == "老板助理"),
+        None,
+    )
+    approval_event = next(
+        (
+            event
+            for event in reversed(events)
+            if event["event_type"] in {"task.archived", "approval.approved", "approval.pending"}
+        ),
+        None,
+    )
+    executive_summary = (
+        boss_run["output"]
+        if boss_run
+        else f"任务「{task['title']}」当前状态为 {task['status']}，尚未生成老板确认版。"
+    )
+    deliverables = [
+        {
+            "agent_name": run["agent_name"],
+            "agent_key": run["agent_key"],
+            "title": "、".join(run["artifacts"][:2]) or run["agent_name"],
+            "artifacts": run["artifacts"],
+            "output": run["output"],
+            "created_at": run["created_at"],
+        }
+        for run in runs
+    ]
+    approval_summary = approval_event["message"] if approval_event else "等待老板确认。"
+    collaborating_agents = "、".join(
+        task["command_protocol"].get("collaborating_agents", [])
+    ) or "暂无"
+    human_collaborators = "、".join(
+        task["command_protocol"].get("human_collaborators", [])
+    ) or "暂无"
+    knowledge_sources = "、".join(source_names) if source_names else "暂无"
+    feedback_summary = (
+        "；".join(f"{item['sender']}：{item['content']}" for item in feedback)
+        if feedback
+        else "暂无"
+    )
+    deliverable_text = "\n\n".join(
+        f"### {item['agent_name']} / {item['title']}\n{item['output']}"
+        for item in deliverables
+    ) or "暂无交付物。"
+    copy_text = "\n\n".join(
+        [
+            f"# {task['title']} - 归档结果包",
+            f"状态：{task['status']}",
+            f"任务目标：{task['goal']}",
+            f"主责数字员工：{task['command_protocol']['primary_agent']}",
+            f"协作数字员工：{collaborating_agents}",
+            f"协作真人员工：{human_collaborators}",
+            f"引用资料：{knowledge_sources}",
+            f"真人反馈：{feedback_summary}",
+            f"审批归档：{approval_summary}",
+            "## 老板确认版",
+            executive_summary,
+            "## 数字员工交付物",
+            deliverable_text,
+        ]
+    )
+    return {
+        "task_id": task_id,
+        "task_title": task["title"],
+        "task_status": task["status"],
+        "executive_summary": executive_summary,
+        "deliverables": deliverables,
+        "knowledge_sources": source_names,
+        "human_feedback": feedback,
+        "approval_summary": approval_summary,
+        "archive_ready": task["status"] in {"completed", "archived"},
+        "copy_text": copy_text,
+    }
+
+
 @router.post("")
 def create_task(payload: CreateTaskRequest) -> dict:
     protocol = payload.command_protocol.as_task_payload()
@@ -247,6 +330,13 @@ def get_task(task_id: str) -> dict:
         "events": task_events.get(task_id, []),
         "agent_runs": agent_runs.get(task_id, []),
     }
+
+
+@router.get("/{task_id}/result-package")
+def get_task_result_package(task_id: str) -> dict:
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return build_task_result_package(task_id)
 
 
 @router.patch("/{task_id}/command-protocol")

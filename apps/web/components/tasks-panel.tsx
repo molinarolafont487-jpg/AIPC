@@ -6,7 +6,9 @@ import {
   BarChart3,
   Bot,
   CheckCircle2,
+  Clipboard,
   Clock3,
+  FileText,
   ListFilter,
   MessageCircle,
   Play,
@@ -19,13 +21,15 @@ import {
   archiveTask,
   dispatchTaskAgents,
   getTask,
+  getTaskResultPackage,
   listTasks,
   runGoldenDemoLoop,
   sendFeishuMessage,
   simulateFeishuReply,
   type AgentRun,
   type Task,
-  type TaskEvent
+  type TaskEvent,
+  type TaskResultPackage
 } from "@/lib/api-client";
 
 const statusLabels: Record<string, string> = {
@@ -44,6 +48,7 @@ export function TasksPanel() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+  const [resultPackage, setResultPackage] = useState<TaskResultPackage | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
   const [message, setMessage] = useState("任务中心会显示AI指挥台创建的任务。");
   const [runningAgents, setRunningAgents] = useState(false);
@@ -69,14 +74,12 @@ export function TasksPanel() {
         : result.items.filter((task) => task.status === statusFilter);
     const taskToSelect = preferredTask || visibleItems[0];
     if (taskToSelect) {
-      const detail = await getTask(taskToSelect.id);
-      setSelectedTask(detail.task);
-      setEvents(detail.events);
-      setAgentRuns(detail.agent_runs);
+      await loadTaskDetail(taskToSelect.id);
     } else {
       setSelectedTask(null);
       setEvents([]);
       setAgentRuns([]);
+      setResultPackage(null);
     }
     setMessage(`已加载 ${result.total} 个任务。`);
   }
@@ -92,10 +95,16 @@ export function TasksPanel() {
   }, []);
 
   async function selectTask(taskId: string) {
+    await loadTaskDetail(taskId);
+  }
+
+  async function loadTaskDetail(taskId: string) {
     const detail = await getTask(taskId);
+    const packageResult = await getTaskResultPackage(taskId);
     setSelectedTask(detail.task);
     setEvents(detail.events);
     setAgentRuns(detail.agent_runs);
+    setResultPackage(packageResult);
   }
 
   async function handleStatusFilterChange(nextStatus: string) {
@@ -108,14 +117,12 @@ export function TasksPanel() {
       setSelectedTask(null);
       setEvents([]);
       setAgentRuns([]);
+      setResultPackage(null);
     }
   }
 
   async function refreshSelectedTask(taskId: string) {
-    const detail = await getTask(taskId);
-    setSelectedTask(detail.task);
-    setEvents(detail.events);
-    setAgentRuns(detail.agent_runs);
+    await loadTaskDetail(taskId);
   }
 
   async function refreshTaskList() {
@@ -214,10 +221,12 @@ export function TasksPanel() {
     setMessage("正在跑完整黄金Demo闭环...");
     try {
       const result = await runGoldenDemoLoop({ auto_archive: true });
+      const packageResult = await getTaskResultPackage(result.task_id);
       setStatusFilter("all");
       setSelectedTask(result.task);
       setEvents(result.events);
       setAgentRuns(result.agent_runs);
+      setResultPackage(packageResult);
       await refreshTaskList();
       setMessage(
         `黄金Demo已完成：${statusLabels[result.status] || result.status}，已生成完整任务时间线。`
@@ -226,6 +235,16 @@ export function TasksPanel() {
       setMessage(error instanceof Error ? error.message : "黄金Demo执行失败。");
     } finally {
       setDemoLoading(false);
+    }
+  }
+
+  async function handleCopyResultPackage() {
+    if (!resultPackage) return;
+    try {
+      await navigator.clipboard.writeText(resultPackage.copy_text);
+      setMessage("归档结果包已复制，可以粘贴到方案文档或汇报材料。");
+    } catch {
+      setMessage("当前浏览器不允许写入剪贴板，请手动复制结果包内容。");
     }
   }
 
@@ -399,6 +418,71 @@ export function TasksPanel() {
                 </div>
               ))}
             </div>
+
+            {resultPackage ? (
+              <div className="rounded-md border border-line p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <FileText size={17} className="text-accent" />
+                    <h3 className="text-sm font-semibold">归档结果包</h3>
+                    <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                      {resultPackage.archive_ready ? "可交付" : "生成中"}
+                    </span>
+                  </div>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700"
+                    onClick={() => void handleCopyResultPackage()}
+                  >
+                    <Clipboard size={15} />
+                    复制结果包
+                  </button>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-4">
+                  {[
+                    ["交付物", resultPackage.deliverables.length],
+                    ["引用资料", resultPackage.knowledge_sources.length],
+                    ["真人反馈", resultPackage.human_feedback.length],
+                    ["状态", statusLabels[resultPackage.task_status] || resultPackage.task_status]
+                  ].map(([label, value]) => (
+                    <div className="rounded-md bg-mist p-3" key={label}>
+                      <div className="text-xs text-slate-500">{label}</div>
+                      <div className="mt-1 text-sm font-semibold">{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 rounded-md bg-mist p-3">
+                  <div className="mb-2 text-xs font-medium text-slate-500">老板确认版</div>
+                  <p className="max-h-40 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                    {resultPackage.executive_summary}
+                  </p>
+                </div>
+
+                <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                  {resultPackage.deliverables.map((item) => (
+                    <article className="rounded-md border border-line p-3" key={item.agent_key}>
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold">{item.agent_name}</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.title}</div>
+                        </div>
+                        <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                          {item.artifacts.length} 项
+                        </span>
+                      </div>
+                      <p className="max-h-28 overflow-hidden whitespace-pre-wrap break-words text-xs leading-5 text-slate-600">
+                        {item.output}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="mt-3 rounded-md bg-[#e9f6f5] p-3 text-xs leading-5 text-slate-700">
+                  {resultPackage.approval_summary}
+                </div>
+              </div>
+            ) : null}
 
             <div className="rounded-md border border-line p-4">
               <div className="mb-3 flex items-center justify-between gap-2">

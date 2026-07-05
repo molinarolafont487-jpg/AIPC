@@ -171,6 +171,32 @@ export type GoldenDemoLoopResponse = {
   command_input: string;
 };
 
+export type TaskResultPackage = {
+  task_id: string;
+  task_title: string;
+  task_status: string;
+  executive_summary: string;
+  deliverables: Array<{
+    agent_name: string;
+    agent_key: string;
+    title: string;
+    artifacts: string[];
+    output: string;
+    created_at: string;
+  }>;
+  knowledge_sources: string[];
+  human_feedback: Array<{
+    id: string;
+    sender: string;
+    content: string;
+    channel: string;
+    created_at: string;
+  }>;
+  approval_summary: string;
+  archive_ready: boolean;
+  copy_text: string;
+};
+
 export type DocumentItem = {
   id: string;
   workspace_id?: string;
@@ -391,6 +417,16 @@ export async function getTask(taskId: string) {
     events: TaskEvent[];
     agent_runs: AgentRun[];
   };
+}
+
+export async function getTaskResultPackage(taskId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/result-package`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取任务结果包。");
+  }
+  return (await response.json()) as TaskResultPackage;
 }
 
 export async function getFeishuStatus() {
