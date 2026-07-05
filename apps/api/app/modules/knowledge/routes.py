@@ -141,6 +141,37 @@ def score_chunk(query_terms: list[str], chunk: dict[str, Any]) -> float:
     return score
 
 
+def search_knowledge_refs(
+    query: str,
+    top_k: int = 5,
+    filters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    query_terms = normalize_terms(query)
+    dataset_filter = (filters or {}).get("dataset")
+    scored = []
+    for chunk in demo_chunks:
+        if dataset_filter and chunk["metadata"].get("dataset") != dataset_filter:
+            continue
+        score = score_chunk(query_terms, chunk)
+        if score > 0:
+            scored.append((score, chunk))
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {
+            "chunk_id": chunk["id"],
+            "document_id": chunk["document_id"],
+            "document_name": chunk["document_name"],
+            "dataset": chunk["metadata"].get("dataset", "custom"),
+            "page_start": chunk["page_start"],
+            "page_end": chunk["page_end"],
+            "score": round(min(score / 10, 0.99), 2),
+            "excerpt": chunk["content"],
+        }
+        for score, chunk in scored[:top_k]
+    ]
+
+
 DEMO_DATASETS = [
     {
         "filename": "华星科技客户资料.md",
@@ -483,29 +514,7 @@ def list_document_chunks(document_id: str) -> dict:
 
 @router.post("/knowledge/search")
 def search(payload: SearchRequest) -> dict:
-    query_terms = normalize_terms(payload.query)
-    dataset_filter = (payload.filters or {}).get("dataset") if payload.filters else None
-    scored = []
-    for chunk in demo_chunks:
-        if dataset_filter and chunk["metadata"].get("dataset") != dataset_filter:
-            continue
-        score = score_chunk(query_terms, chunk)
-        if score > 0:
-            scored.append((score, chunk))
-
-    scored.sort(key=lambda item: item[0], reverse=True)
-    chunks = [
-        {
-            "chunk_id": chunk["id"],
-            "document_id": chunk["document_id"],
-            "document_name": chunk["document_name"],
-            "page_start": chunk["page_start"],
-            "page_end": chunk["page_end"],
-            "score": round(min(score / 10, 0.99), 2),
-            "excerpt": chunk["content"],
-        }
-        for score, chunk in scored[: payload.top_k]
-    ]
+    chunks = search_knowledge_refs(payload.query, payload.top_k, payload.filters)
     return {"answerable": bool(chunks), "query": payload.query, "chunks": chunks}
 
 

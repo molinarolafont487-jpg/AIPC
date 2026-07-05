@@ -16,6 +16,17 @@ TaskType = Literal[
 RiskLevel = Literal["low", "medium", "high"]
 
 
+class KnowledgeReference(BaseModel):
+    chunk_id: str
+    document_id: str
+    document_name: str
+    dataset: str = "custom"
+    page_start: int = 1
+    page_end: int = 1
+    score: float = 0
+    excerpt: str
+
+
 class CommandProtocol(BaseModel):
     task_title: str = Field(min_length=1)
     task_goal: str = Field(min_length=1)
@@ -30,6 +41,7 @@ class CommandProtocol(BaseModel):
     risk_level: RiskLevel = "low"
     notification_channel: Literal["飞书"] = "飞书"
     archive_location: str = "任务中心"
+    knowledge_refs: list[KnowledgeReference] = Field(default_factory=list)
 
     @field_validator(
         "collaborating_agents",
@@ -50,4 +62,3 @@ class CommandProtocol(BaseModel):
 
     def as_task_payload(self) -> dict:
         return self.model_dump()
-

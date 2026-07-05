@@ -33,6 +33,13 @@ def find_agent_id_by_name(name: str) -> str | None:
     return agent["id"] if agent else None
 
 
+def summarize_knowledge_refs(refs: list[dict]) -> str:
+    document_names = list(dict.fromkeys(ref["document_name"] for ref in refs))
+    if not document_names:
+        return "暂无可引用资料。"
+    return "、".join(document_names[:3]) + (" 等" if len(document_names) > 3 else "")
+
+
 @router.post("")
 def create_task(payload: CreateTaskRequest) -> dict:
     protocol = payload.command_protocol.as_task_payload()
@@ -53,12 +60,21 @@ def create_task(payload: CreateTaskRequest) -> dict:
     }
     tasks[task_id] = task
     add_task_event(task_id, "task.created", "任务卡已生成，等待老板确认。")
+    knowledge_refs = protocol.get("knowledge_refs", [])
+    if knowledge_refs:
+        add_task_event(
+            task_id,
+            "knowledge.linked",
+            f"任务卡已关联 {len(knowledge_refs)} 条知识库引用：{summarize_knowledge_refs(knowledge_refs)}。",
+            metadata={"knowledge_refs": knowledge_refs},
+        )
     return {"task_id": task_id, "status": task["status"], "task": task}
 
 
 @router.get("")
 def list_tasks() -> dict:
-    return {"items": list(tasks.values()), "total": len(tasks)}
+    items = sorted(tasks.values(), key=lambda item: item["created_at"], reverse=True)
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/{task_id}")
@@ -112,8 +128,18 @@ def start_task(task_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Task not found")
     task["status"] = "waiting_human"
     task["updated_at"] = utc_now()
+    knowledge_refs = task["command_protocol"].get("knowledge_refs", [])
     add_task_event(task_id, "agent.started", "销售助理开始执行客户跟进任务。")
-    add_task_event(task_id, "tool.called", "知识库助理检索客户资料和产品资料。")
+    add_task_event(
+        task_id,
+        "tool.called",
+        (
+            f"知识库助理已读取 {len(knowledge_refs)} 条引用资料：{summarize_knowledge_refs(knowledge_refs)}。"
+            if knowledge_refs
+            else "知识库助理检索客户资料和产品资料。"
+        ),
+        metadata={"knowledge_refs": knowledge_refs},
+    )
     add_task_event(task_id, "feishu.pending", "等待销售小张在飞书补充预算。")
     return {"task_id": task_id, "status": task["status"]}
 

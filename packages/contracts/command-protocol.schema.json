@@ -55,8 +55,35 @@
     "approval_required": { "type": "boolean" },
     "risk_level": { "type": "string", "enum": ["low", "medium", "high"] },
     "notification_channel": { "type": "string", "enum": ["飞书"] },
-    "archive_location": { "type": "string" }
+    "archive_location": { "type": "string" },
+    "knowledge_refs": {
+      "type": "array",
+      "description": "Knowledge base citations attached while parsing the natural-language command.",
+      "items": {
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "document_name",
+          "dataset",
+          "page_start",
+          "page_end",
+          "score",
+          "excerpt"
+        ],
+        "properties": {
+          "chunk_id": { "type": "string" },
+          "document_id": { "type": "string" },
+          "document_name": { "type": "string" },
+          "dataset": { "type": "string" },
+          "page_start": { "type": "integer" },
+          "page_end": { "type": "integer" },
+          "score": { "type": "number" },
+          "excerpt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
   },
   "additionalProperties": false
 }
-

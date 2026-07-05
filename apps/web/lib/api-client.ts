@@ -50,6 +50,18 @@ export type CommandProtocol = {
   risk_level: "low" | "medium" | "high";
   notification_channel: "飞书";
   archive_location: string;
+  knowledge_refs?: KnowledgeReference[];
+};
+
+export type KnowledgeReference = {
+  chunk_id: string;
+  document_id: string;
+  document_name: string;
+  dataset: string;
+  page_start: number;
+  page_end: number;
+  score: number;
+  excerpt: string;
 };
 
 export type RoutingRules = Record<
@@ -330,15 +342,7 @@ export async function searchKnowledge(
   return (await response.json()) as {
     answerable: boolean;
     query: string;
-    chunks: Array<{
-      chunk_id: string;
-      document_id: string;
-      document_name: string;
-      page_start: number;
-      page_end: number;
-      score: number;
-      excerpt: string;
-    }>;
+    chunks: KnowledgeReference[];
   };
 }
 

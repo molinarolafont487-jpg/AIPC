@@ -102,7 +102,8 @@ export function CommandCenter() {
       setProtocol(result.command_protocol);
       setTaskId(null);
       setTaskStatus("待确认");
-      setMessage("任务卡已生成，可以确认执行。");
+      const refCount = result.command_protocol.knowledge_refs?.length ?? 0;
+      setMessage(`任务卡已生成，并关联 ${refCount} 条知识库引用，可以确认执行。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "解析失败。");
     } finally {
@@ -117,8 +118,9 @@ export function CommandCenter() {
     try {
       const result = await routeCommand(protocol);
       setProtocol(result.command_protocol);
+      const refCount = result.command_protocol.knowledge_refs?.length ?? 0;
       setRoutingMessage(
-        `${result.command_protocol.task_type} 已路由到 ${result.command_protocol.primary_agent}。`
+        `${result.command_protocol.task_type} 已路由到 ${result.command_protocol.primary_agent}，更新 ${refCount} 条引用。`
       );
     } catch (error) {
       setRoutingMessage(error instanceof Error ? error.message : "路由失败。");
@@ -399,6 +401,41 @@ export function CommandCenter() {
               <div className="rounded-md bg-mist p-3 text-xs leading-5 text-slate-600">
                 <div>当前路由：{taskTypeHelp}</div>
                 <div>{routingMessage}</div>
+              </div>
+
+              <div className="rounded-md border border-line p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-slate-600">
+                    知识库引用
+                  </span>
+                  <span className="rounded bg-mist px-2 py-1 text-[11px] text-slate-500">
+                    {protocol.knowledge_refs?.length ?? 0} 条
+                  </span>
+                </div>
+                {protocol.knowledge_refs?.length ? (
+                  <div className="space-y-2">
+                    {protocol.knowledge_refs.map((ref) => (
+                      <article
+                        className="rounded-md bg-mist p-3"
+                        key={ref.chunk_id}
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                          <span>{ref.document_name}</span>
+                          <span>{ref.dataset}</span>
+                          <span>p.{ref.page_start}-{ref.page_end}</span>
+                          <span>score {ref.score}</span>
+                        </div>
+                        <p className="max-h-24 overflow-hidden break-words text-xs leading-5 text-slate-600">
+                          {ref.excerpt}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs leading-5 text-slate-500">
+                    生成任务卡后会自动检索企业知识库并附上引用。
+                  </p>
+                )}
               </div>
             </div>
           ) : (

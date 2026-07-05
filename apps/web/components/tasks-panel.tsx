@@ -113,6 +113,36 @@ export function TasksPanel() {
               ))}
             </div>
 
+            <div className="rounded-md border border-line p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">知识库引用</h3>
+                <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                  {selectedTask.command_protocol.knowledge_refs?.length ?? 0} 条
+                </span>
+              </div>
+              {selectedTask.command_protocol.knowledge_refs?.length ? (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {selectedTask.command_protocol.knowledge_refs.map((ref) => (
+                    <article className="rounded-md bg-mist p-3" key={ref.chunk_id}>
+                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span>{ref.document_name}</span>
+                        <span>{ref.dataset}</span>
+                        <span>p.{ref.page_start}-{ref.page_end}</span>
+                        <span>score {ref.score}</span>
+                      </div>
+                      <p className="max-h-24 overflow-hidden break-words text-xs leading-5 text-slate-600">
+                        {ref.excerpt}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  该任务尚未关联知识库引用。
+                </p>
+              )}
+            </div>
+
             <div className="space-y-3">
               {events.map((event) => (
                 <div className="flex gap-3 rounded-md border border-line p-3" key={event.id}>
@@ -138,4 +168,3 @@ export function TasksPanel() {
     </div>
   );
 }
-
