@@ -1,8 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Clock3, MessageCircle, Play, RefreshCcw, Send } from "lucide-react";
 import {
+  Archive,
+  Bot,
+  CheckCircle2,
+  Clock3,
+  MessageCircle,
+  Play,
+  RefreshCcw,
+  Send
+} from "lucide-react";
+import {
+  approveTask,
+  archiveTask,
   dispatchTaskAgents,
   getTask,
   listTasks,
@@ -32,6 +43,10 @@ export function TasksPanel() {
   const [message, setMessage] = useState("任务中心会显示AI指挥台创建的任务。");
   const [runningAgents, setRunningAgents] = useState(false);
   const [feishuLoading, setFeishuLoading] = useState(false);
+  const [closingTask, setClosingTask] = useState(false);
+  const [approvalComment, setApprovalComment] = useState(
+    "老板确认：预算信息已补充，客户方案可以作为演示结果归档。"
+  );
   const [replyContent, setReplyContent] = useState(
     "华星科技预算约8万元，采购周期预计30天，倾向本地部署，IT负责人重点关注数据不出域。"
   );
@@ -70,6 +85,11 @@ export function TasksPanel() {
     setSelectedTask(detail.task);
     setEvents(detail.events);
     setAgentRuns(detail.agent_runs);
+  }
+
+  async function refreshTaskList() {
+    const result = await listTasks();
+    setTasks(result.items);
   }
 
   async function runAgents(force = false) {
@@ -125,6 +145,56 @@ export function TasksPanel() {
       setFeishuLoading(false);
     }
   }
+
+  async function handleApproveTask() {
+    if (!selectedTask) return;
+    setClosingTask(true);
+    setMessage("正在提交老板确认...");
+    try {
+      const result = await approveTask(selectedTask.id, approvalComment);
+      await refreshSelectedTask(result.task_id);
+      await refreshTaskList();
+      setMessage("老板已确认结果，任务状态已变为已完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "老板确认失败。");
+    } finally {
+      setClosingTask(false);
+    }
+  }
+
+  async function handleArchiveTask() {
+    if (!selectedTask) return;
+    setClosingTask(true);
+    setMessage("正在归档任务...");
+    try {
+      const result = await archiveTask(selectedTask.id);
+      await refreshSelectedTask(result.task_id);
+      await refreshTaskList();
+      setMessage("任务已归档到任务中心，完整闭环演示完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "任务归档失败。");
+    } finally {
+      setClosingTask(false);
+    }
+  }
+
+  const canApprove =
+    selectedTask !== null && selectedTask.status !== "completed" && selectedTask.status !== "archived";
+  const canArchive = selectedTask?.status === "completed";
+  const closureSteps = [
+    {
+      label: "飞书回流",
+      done: events.some((event) => event.event_type === "feishu.reply_received")
+    },
+    {
+      label: "老板确认",
+      done: selectedTask?.status === "completed" || selectedTask?.status === "archived"
+    },
+    {
+      label: "任务归档",
+      done: selectedTask?.status === "archived"
+    }
+  ];
 
   return (
     <div className="grid gap-5 p-5 xl:grid-cols-[420px_1fr]">
@@ -316,6 +386,63 @@ export function TasksPanel() {
                 <MessageCircle size={15} />
                 模拟小张回复并回流
               </button>
+            </div>
+
+            <div className="rounded-md border border-line p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={17} className="text-accent" />
+                  <h3 className="text-sm font-semibold">老板确认与归档</h3>
+                  <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                    {statusLabels[selectedTask.status] || selectedTask.status}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={closingTask || !canApprove}
+                    onClick={() => void handleApproveTask()}
+                  >
+                    <CheckCircle2 size={15} />
+                    老板确认结果
+                  </button>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={closingTask || !canArchive}
+                    onClick={() => void handleArchiveTask()}
+                  >
+                    <Archive size={15} />
+                    归档任务
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:grid-cols-[1fr_240px]">
+                <textarea
+                  className="min-h-20 w-full resize-none rounded-md border border-line px-3 py-2 text-sm leading-6 outline-none focus:border-accent"
+                  value={approvalComment}
+                  onChange={(event) => setApprovalComment(event.target.value)}
+                />
+                <div className="rounded-md bg-mist p-3 text-xs leading-5 text-slate-600">
+                  <div className="mb-2 font-medium text-slate-700">闭环进度</div>
+                  <div className="space-y-2">
+                    {closureSteps.map((step) => (
+                      <div className="flex items-center gap-2" key={step.label}>
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                            step.done
+                              ? "border-accent bg-[#e9f6f5] text-accent"
+                              : "border-line bg-white text-slate-300"
+                          }`}
+                        >
+                          {step.done ? <CheckCircle2 size={12} /> : null}
+                        </span>
+                        <span>{step.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-3">

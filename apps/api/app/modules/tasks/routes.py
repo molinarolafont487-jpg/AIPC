@@ -207,6 +207,8 @@ def approve_task(task_id: str, payload: DecisionRequest | None = None) -> dict:
     task = tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] == "archived":
+        raise HTTPException(status_code=409, detail="Archived task cannot be approved")
     task["status"] = "completed"
     task["updated_at"] = utc_now()
     add_task_event(
@@ -223,6 +225,8 @@ def archive_task(task_id: str) -> dict:
     task = tasks.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=409, detail="Task must be completed before archive")
     task["status"] = "archived"
     task["updated_at"] = utc_now()
     add_task_event(task_id, "task.archived", "任务已归档到任务中心。")

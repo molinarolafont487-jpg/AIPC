@@ -320,6 +320,28 @@ export async function dispatchTaskAgents(taskId: string, force = false) {
   return (await response.json()) as { task_id: string; agent_runs: AgentRun[] };
 }
 
+export async function approveTask(taskId: string, comment?: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment })
+  });
+  if (!response.ok) {
+    throw new Error("老板确认失败。");
+  }
+  return (await response.json()) as { task_id: string; status: string };
+}
+
+export async function archiveTask(taskId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/archive`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error("任务归档失败。");
+  }
+  return (await response.json()) as { task_id: string; status: string };
+}
+
 export async function listTasks() {
   const response = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
     cache: "no-store"
