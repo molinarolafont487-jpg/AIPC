@@ -135,6 +135,32 @@ export type AgentRun = {
   created_at: string;
 };
 
+export type FeishuMessage = {
+  id: string;
+  task_id: string;
+  channel: "feishu";
+  direction: "outbound" | "inbound";
+  sender: string;
+  receiver: string;
+  content: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type FeishuStatus = {
+  channel: "feishu";
+  mode: "mock" | "webhook";
+  configured: boolean;
+  message: string;
+  counts: {
+    sent: number;
+    received: number;
+    waiting_reply: number;
+    failed: number;
+  };
+};
+
 export type DocumentItem = {
   id: string;
   workspace_id?: string;
@@ -315,6 +341,68 @@ export async function getTask(taskId: string) {
     task: Task;
     events: TaskEvent[];
     agent_runs: AgentRun[];
+  };
+}
+
+export async function getFeishuStatus() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/integrations/feishu/status`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取飞书集成状态。");
+  }
+  return (await response.json()) as FeishuStatus;
+}
+
+export async function listFeishuMessages() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/integrations/feishu/messages`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取飞书消息。");
+  }
+  return (await response.json()) as { items: FeishuMessage[]; total: number };
+}
+
+export async function sendFeishuMessage(payload: {
+  task_id: string;
+  receiver?: string;
+  content?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/integrations/feishu/send-message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("飞书补充请求发送失败。");
+  }
+  return (await response.json()) as {
+    ok: boolean;
+    task_id: string;
+    message: FeishuMessage;
+  };
+}
+
+export async function simulateFeishuReply(payload: {
+  task_id: string;
+  sender?: string;
+  content?: string;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/integrations/feishu/simulate-reply`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("飞书回复回流失败。");
+  }
+  return (await response.json()) as {
+    ok: boolean;
+    task_id: string;
+    message: FeishuMessage;
+    agent_runs: AgentRun[];
+    status: string;
   };
 }
 

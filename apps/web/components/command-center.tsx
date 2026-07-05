@@ -16,6 +16,7 @@ import {
   getRoutingRules,
   parseCommand,
   routeCommand,
+  sendFeishuMessage,
   startTask,
   updateTaskProtocol,
   type CommandProtocol
@@ -180,6 +181,25 @@ export function CommandCenter() {
       setMessage("任务已进入任务中心，并等待飞书真人补充。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "任务启动失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSendFeishuRequest() {
+    if (!taskId || !protocol) {
+      setMessage("请先生成任务卡并确认执行，再发送飞书请求。");
+      return;
+    }
+    setLoading(true);
+    setMessage("正在发送飞书补充请求...");
+    try {
+      const receiver = protocol.human_collaborators[0] || "销售小张";
+      const result = await sendFeishuMessage({ task_id: taskId, receiver });
+      setTaskStatus("waiting_human");
+      setMessage(`飞书请求已发送给${receiver}：${result.message.status}。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "飞书请求发送失败。");
     } finally {
       setLoading(false);
     }
@@ -519,7 +539,11 @@ export function CommandCenter() {
               回复回流后，任务将从等待真人补充切回执行中。
             </p>
           </div>
-          <button className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700">
+          <button
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={loading}
+            onClick={handleSendFeishuRequest}
+          >
             <Send size={15} />
             发送飞书请求
           </button>

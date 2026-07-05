@@ -49,6 +49,16 @@ API: http://localhost:8000
 API Docs: http://localhost:8000/docs
 ```
 
+## 飞书协同 Demo
+
+Day 7 默认使用本地模拟发送与回流。若要尝试真实飞书自定义机器人通知，可在 `.env` 中配置：
+
+```bash
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-token
+```
+
+未配置时，任务中心的“发送补充请求”和“模拟小张回复并回流”仍可完整演示任务状态、消息审计和 Agent 继续执行。
+
 ## 7天MVP文档
 
 - [7天MVP规格说明](docs/phantom-ai-workstation/01-spec-7day-mvp.md)

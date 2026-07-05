@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bot, Clock3, Play, RefreshCcw } from "lucide-react";
+import { Bot, Clock3, MessageCircle, Play, RefreshCcw, Send } from "lucide-react";
 import {
   dispatchTaskAgents,
   getTask,
   listTasks,
+  sendFeishuMessage,
+  simulateFeishuReply,
   type AgentRun,
   type Task,
   type TaskEvent
@@ -29,6 +31,10 @@ export function TasksPanel() {
   const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
   const [message, setMessage] = useState("任务中心会显示AI指挥台创建的任务。");
   const [runningAgents, setRunningAgents] = useState(false);
+  const [feishuLoading, setFeishuLoading] = useState(false);
+  const [replyContent, setReplyContent] = useState(
+    "华星科技预算约8万元，采购周期预计30天，倾向本地部署，IT负责人重点关注数据不出域。"
+  );
 
   async function loadTasks() {
     const result = await listTasks();
@@ -59,21 +65,64 @@ export function TasksPanel() {
     setAgentRuns(detail.agent_runs);
   }
 
+  async function refreshSelectedTask(taskId: string) {
+    const detail = await getTask(taskId);
+    setSelectedTask(detail.task);
+    setEvents(detail.events);
+    setAgentRuns(detail.agent_runs);
+  }
+
   async function runAgents(force = false) {
     if (!selectedTask) return;
     setRunningAgents(true);
     setMessage("正在执行数字员工 Prompt...");
     try {
       const result = await dispatchTaskAgents(selectedTask.id, force);
-      const detail = await getTask(result.task_id);
-      setSelectedTask(detail.task);
-      setEvents(detail.events);
-      setAgentRuns(detail.agent_runs);
+      await refreshSelectedTask(result.task_id);
       setMessage(`已生成 ${result.agent_runs.length} 个数字员工输出。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "数字员工执行失败。");
     } finally {
       setRunningAgents(false);
+    }
+  }
+
+  async function handleSendFeishuRequest() {
+    if (!selectedTask) return;
+    const receiver = selectedTask.command_protocol.human_collaborators[0] || "销售小张";
+    setFeishuLoading(true);
+    setMessage(`正在向${receiver}发送飞书补充请求...`);
+    try {
+      const result = await sendFeishuMessage({
+        task_id: selectedTask.id,
+        receiver
+      });
+      await refreshSelectedTask(result.task_id);
+      setMessage(`飞书请求已发送：${result.message.status}。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "飞书请求发送失败。");
+    } finally {
+      setFeishuLoading(false);
+    }
+  }
+
+  async function handleSimulateReply() {
+    if (!selectedTask) return;
+    const sender = selectedTask.command_protocol.human_collaborators[0] || "销售小张";
+    setFeishuLoading(true);
+    setMessage("正在模拟飞书回复回流...");
+    try {
+      const result = await simulateFeishuReply({
+        task_id: selectedTask.id,
+        sender,
+        content: replyContent
+      });
+      await refreshSelectedTask(result.task_id);
+      setMessage("小张回复已回流，销售助理和老板助理已更新输出。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "飞书回复回流失败。");
+    } finally {
+      setFeishuLoading(false);
     }
   }
 
@@ -227,6 +276,46 @@ export function TasksPanel() {
                   点击“执行数字员工”后，将按任务卡分配主责与协作数字员工，并由老板助理生成确认版。
                 </p>
               )}
+            </div>
+
+            <div className="rounded-md border border-line p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <MessageCircle size={17} className="text-accent" />
+                  <h3 className="text-sm font-semibold">飞书真人协同</h3>
+                  <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                    {statusLabels[selectedTask.status] || selectedTask.status}
+                  </span>
+                </div>
+                <button
+                  className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={feishuLoading}
+                  onClick={() => void handleSendFeishuRequest()}
+                >
+                  <Send size={15} />
+                  发送补充请求
+                </button>
+              </div>
+
+              <div className="rounded-md bg-mist p-3 text-sm leading-6 text-slate-700">
+                销售助理会请求
+                {selectedTask.command_protocol.human_collaborators[0] || "销售小张"}
+                补充预算、采购周期、部署要求和关键关注点。未配置真实Webhook时使用本地模拟发送。
+              </div>
+
+              <textarea
+                className="mt-3 min-h-20 w-full resize-none rounded-md border border-line px-3 py-2 text-sm leading-6 outline-none focus:border-accent"
+                value={replyContent}
+                onChange={(event) => setReplyContent(event.target.value)}
+              />
+              <button
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={feishuLoading}
+                onClick={() => void handleSimulateReply()}
+              >
+                <MessageCircle size={15} />
+                模拟小张回复并回流
+              </button>
             </div>
 
             <div className="space-y-3">

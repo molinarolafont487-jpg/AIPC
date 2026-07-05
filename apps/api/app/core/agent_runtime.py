@@ -122,6 +122,10 @@ def output_for_agent(
     deadline = protocol.get("deadline", "待确认")
     expected_outputs = "、".join(protocol.get("expected_outputs", [])) or "任务结果"
     source_summary = "、".join(protocol.get("input_sources", [])) or "任务卡"
+    human_feedback = task.get("human_feedback", [])
+    feedback_summary = "；".join(
+        f"{item['sender']}：{item['content']}" for item in human_feedback[-2:]
+    )
 
     if agent_name == "知识库助理":
         evidence_lines = "\n".join(
@@ -146,13 +150,23 @@ def output_for_agent(
 
     if agent_name == "销售助理":
         human_text = "、".join(human_collaborators) if human_collaborators else "真人销售"
+        budget_line = (
+            f"已收到真人补充：{feedback_summary}。可据此更新方案预算段，但正式报价仍需老板确认。"
+            if feedback_summary
+            else f"预算信息不能编造，需要 {human_text} 补充。"
+        )
+        supplement_line = (
+            "预算信息已回流，下一步建议确认报价边界、付款周期和试点范围。"
+            if feedback_summary
+            else f"请 {human_text} 在飞书补充预算上限、付款周期、竞品情况和关键联系人偏好。"
+        )
         return (
             "\n".join(
                 [
                     "一、客户判断",
                     f"{title}属于客户跟进型任务，当前资料显示客户关注预算、数据安全和落地周期。",
                     "二、需求与预算线索",
-                    f"可用资料：{ref_summary}；预算信息不能编造，需要 {human_text} 补充。",
+                    f"可用资料：{ref_summary}；{budget_line}",
                     "三、推荐沟通话术",
                     "建议从“先跑一条真实协同闭环”切入，强调自然语言指挥、知识库引用、飞书真人协同和老板确认。",
                     "四、合作方案要点",
@@ -160,7 +174,7 @@ def output_for_agent(
                     "五、邮件草稿",
                     "建议邮件主题：华星科技AI工作站试点方案初稿确认。正文先同步试点范围，再列出待补充预算和部署要求。",
                     "六、需要真人补充的信息",
-                    f"请 {human_text} 在飞书补充预算上限、付款周期、竞品情况和关键联系人偏好。",
+                    supplement_line,
                 ]
             ),
             ["客户分析", "销售话术", "邮件草稿", "真人补充请求"],
@@ -222,15 +236,20 @@ def output_for_agent(
         )
 
     if agent_name == "老板助理":
+        feedback_line = (
+            f"真人补充：{feedback_summary}。"
+            if feedback_summary
+            else "真人预算信息尚未回流。"
+        )
         return (
             "\n".join(
                 [
                     "一、结论",
                     f"任务「{title}」已完成数字员工阶段输出，当前可进入老板确认前检查。",
                     "二、关键依据",
-                    f"知识库依据：{ref_summary}；数字员工状态：{summarize_previous_runs(previous_runs)}。",
+                    f"知识库依据：{ref_summary}；{feedback_line} 数字员工状态：{summarize_previous_runs(previous_runs)}。",
                     "三、风险提醒",
-                    "预算、报价边界和外发材料仍需人工确认；不可直接承诺合同条款。",
+                    "报价边界、付款周期和外发材料仍需人工确认；不可直接承诺合同条款。",
                     "四、需要老板确认",
                     f"确认输出范围是否覆盖：{expected_outputs}；确认是否等待真人补充后再归档。",
                     "五、建议下一步动作",

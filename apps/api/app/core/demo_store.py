@@ -154,6 +154,7 @@ agents = [
 tasks: dict[str, dict[str, Any]] = {}
 task_events: dict[str, list[dict[str, Any]]] = {}
 agent_runs: dict[str, list[dict[str, Any]]] = {}
+feishu_messages: dict[str, dict[str, Any]] = {}
 
 
 def utc_now() -> str:

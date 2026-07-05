@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     feishu_app_secret: str = ""
     feishu_verification_token: str = ""
     feishu_encrypt_key: str = ""
+    feishu_webhook_url: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -25,4 +26,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
