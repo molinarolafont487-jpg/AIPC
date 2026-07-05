@@ -4,13 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Bot,
+  Brain,
   BriefcaseBusiness,
   ClipboardList,
-  Code2,
+  Cpu,
   Database,
   FileText,
   LayoutDashboard,
   MessageSquareText,
+  Plug,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -20,6 +22,7 @@ import { WorkspaceStatus } from "@/components/workspace-status";
 
 const navItems = [
   { label: "AI指挥台", href: "/", icon: LayoutDashboard },
+  { label: "AI对话中心", href: "/chat", icon: Brain },
   { label: "任务中心", href: "/tasks", icon: ClipboardList },
   { label: "六个数字员工", href: "/agents", icon: Bot },
   { label: "真人员工", href: "/humans", icon: Users },
@@ -28,6 +31,8 @@ const navItems = [
   { label: "客户中心", href: "/customers", icon: BriefcaseBusiness },
   { label: "项目中心", href: "/projects", icon: FileText },
   { label: "企业规则", href: "/rules", icon: ShieldCheck },
+  { label: "连接器中心", href: "/connectors", icon: Plug },
+  { label: "模型调度", href: "/model-router", icon: Cpu },
   { label: "系统设置", href: "/settings", icon: Settings }
 ];
 
@@ -101,4 +106,3 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
     </main>
   );
 }
-

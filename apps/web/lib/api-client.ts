@@ -197,6 +197,76 @@ export type TaskResultPackage = {
   copy_text: string;
 };
 
+export type ChatMode = "general" | "knowledge" | "agent" | "model";
+
+export type ChatConversation = {
+  id: string;
+  workspace_id: string;
+  creator_id: string;
+  title: string;
+  mode: ChatMode;
+  agent_name: string | null;
+  model_key: string;
+  dataset: string | null;
+  last_task_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  conversation_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  metadata: {
+    mode?: ChatMode;
+    agent_name?: string | null;
+    dataset?: string | null;
+    model_key?: string;
+    model_name?: string;
+    knowledge_refs?: KnowledgeReference[];
+    actions?: Array<{ key: string; label: string }>;
+    task_id?: string;
+    action?: string;
+    usage_id?: string;
+  };
+  created_at: string;
+};
+
+export type ModelRouterStatus = {
+  summary: {
+    total_calls: number;
+    total_tokens: number;
+    estimated_cost: number;
+    local_ratio: number;
+    cloud_ratio: number;
+  };
+  models: Array<{
+    model_key: string;
+    name: string;
+    provider: "local" | "cloud";
+    quality: string;
+    unit_cost: number;
+    status: string;
+    calls: number;
+    tokens: number;
+    estimated_cost: number;
+  }>;
+  recent_usage: Array<{
+    id: string;
+    workspace_id: string;
+    conversation_id: string;
+    model_key: string;
+    model_name: string;
+    provider: "local" | "cloud";
+    mode: ChatMode;
+    input_tokens: number;
+    output_tokens: number;
+    estimated_cost: number;
+    created_at: string;
+  }>;
+};
+
 export type DocumentItem = {
   id: string;
   workspace_id?: string;
@@ -427,6 +497,113 @@ export async function getTaskResultPackage(taskId: string) {
     throw new Error("无法读取任务结果包。");
   }
   return (await response.json()) as TaskResultPackage;
+}
+
+export async function listChatConversations() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/chat/conversations`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取AI对话历史。");
+  }
+  return (await response.json()) as { items: ChatConversation[]; total: number };
+}
+
+export async function createChatConversation(payload: {
+  title?: string;
+  mode?: ChatMode;
+  agent_name?: string | null;
+  model_key?: string | null;
+  dataset?: string | null;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/chat/conversations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("对话创建失败。");
+  }
+  return (await response.json()) as {
+    conversation: ChatConversation;
+    messages: ChatMessage[];
+  };
+}
+
+export async function getChatConversation(conversationId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/chat/conversations/${conversationId}`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取对话详情。");
+  }
+  return (await response.json()) as {
+    conversation: ChatConversation;
+    messages: ChatMessage[];
+  };
+}
+
+export async function sendChatMessage(
+  conversationId: string,
+  payload: {
+    content: string;
+    mode: ChatMode;
+    agent_name?: string | null;
+    model_key?: string | null;
+    dataset?: string | null;
+  }
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/chat/conversations/${conversationId}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }
+  );
+  if (!response.ok) {
+    throw new Error("AI对话生成失败。");
+  }
+  return (await response.json()) as {
+    conversation: ChatConversation;
+    messages: ChatMessage[];
+    user_message: ChatMessage;
+    assistant_message: ChatMessage;
+  };
+}
+
+export async function convertChatToTask(
+  conversationId: string,
+  payload?: { message_id?: string; instruction?: string }
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/chat/conversations/${conversationId}/convert-to-task`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload ?? {})
+    }
+  );
+  if (!response.ok) {
+    throw new Error("对话转任务失败。");
+  }
+  return (await response.json()) as {
+    task_id: string;
+    status: string;
+    task: Task;
+    conversation: ChatConversation;
+    messages: ChatMessage[];
+  };
+}
+
+export async function getModelRouterStatus() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/model-router/status`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取模型调度状态。");
+  }
+  return (await response.json()) as ModelRouterStatus;
 }
 
 export async function getFeishuStatus() {
