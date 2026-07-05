@@ -22,6 +22,7 @@ from app.core.schemas import CommandProtocol
 from app.modules.commands.routes import attach_knowledge_refs, infer_dataset_filter
 from app.modules.knowledge.routes import (
     CreateDocumentRequest,
+    get_document_by_id,
     search_knowledge_refs,
     upsert_document,
 )
@@ -58,6 +59,10 @@ class SaveToKnowledgeRequest(BaseModel):
     message_id: str | None = None
     dataset: str = "对话沉淀"
     filename: str | None = None
+
+
+class AttachDocumentRequest(BaseModel):
+    document_id: str = Field(min_length=1)
 
 
 def estimate_tokens(text: str) -> int:
@@ -178,6 +183,70 @@ def summarize_refs(refs: list[dict[str, Any]]) -> str:
     )
 
 
+def document_context_payload(document: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": document["id"],
+        "name": document["name"],
+        "dataset": document.get("dataset", "custom"),
+        "file_type": document.get("file_type", "txt"),
+        "chunk_count": document.get("chunk_count", 0),
+        "created_at": document["created_at"],
+    }
+
+
+def add_conversation_document(
+    conversation: dict[str, Any],
+    document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    documents = conversation.setdefault("context_documents", [])
+    payload = document_context_payload(document)
+    existing_index = next(
+        (index for index, item in enumerate(documents) if item["id"] == document["id"]),
+        None,
+    )
+    if existing_index is None:
+        documents.insert(0, payload)
+    else:
+        documents[existing_index] = payload
+    conversation["context_documents"] = documents[:8]
+    conversation["last_knowledge_document_id"] = document["id"]
+    conversation["dataset"] = document.get("dataset", conversation.get("dataset"))
+    conversation["updated_at"] = utc_now()
+    return conversation["context_documents"]
+
+
+def conversation_document_ids(conversation: dict[str, Any]) -> list[str]:
+    return [item["id"] for item in conversation.get("context_documents", [])]
+
+
+def build_task_protocol_from_conversation(
+    source_text: str,
+    conversation: dict[str, Any],
+) -> dict[str, Any]:
+    protocol = parse_command(source_text)
+    document_ids = conversation_document_ids(conversation)
+    if not document_ids:
+        return attach_knowledge_refs(protocol, source_text)
+
+    query = " ".join(
+        [
+            source_text,
+            protocol.get("task_title", ""),
+            protocol.get("task_goal", ""),
+            *protocol.get("input_sources", []),
+            *protocol.get("expected_outputs", []),
+        ]
+    )
+    refs = search_knowledge_refs(
+        query,
+        top_k=5,
+        filters={"document_ids": document_ids},
+    )
+    if not refs:
+        refs = attach_knowledge_refs(protocol, source_text).get("knowledge_refs", [])
+    return {**protocol, "knowledge_refs": refs}
+
+
 def build_agent_answer(agent_name: str, content: str, refs: list[dict[str, Any]]) -> str:
     config = AGENT_PROMPT_CONFIGS.get(agent_name)
     if not config:
@@ -203,8 +272,14 @@ def generate_answer(
     mode: str,
     agent_name: str | None,
     dataset: str | None,
+    document_ids: list[str] | None = None,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, str]]]:
-    filters = {"dataset": dataset} if dataset else infer_dataset_filter(content)
+    filters = {"document_ids": document_ids} if document_ids else {}
+    if dataset:
+        filters["dataset"] = dataset
+    elif not document_ids:
+        filters = infer_dataset_filter(content) or {}
+    filters = filters or None
     refs = search_knowledge_refs(content, top_k=4, filters=filters)
     actions = [
         {"key": "convert_task", "label": "转为任务"},
@@ -371,6 +446,7 @@ def create_conversation(payload: CreateConversationRequest) -> dict:
         "agent_name": payload.agent_name,
         "model_key": payload.model_key or "local-balanced",
         "dataset": payload.dataset,
+        "context_documents": [],
         "created_at": utc_now(),
         "updated_at": utc_now(),
     }
@@ -418,6 +494,7 @@ def send_message(conversation_id: str, payload: SendMessageRequest) -> dict:
         payload.mode,
         payload.agent_name,
         payload.dataset,
+        conversation_document_ids(conversation),
     )
     generation_meta: dict[str, Any] = {"generation": "fallback"}
     actual_usage: dict[str, int] | None = None
@@ -480,6 +557,34 @@ def send_message(conversation_id: str, payload: SendMessageRequest) -> dict:
     }
 
 
+@chat_router.post("/conversations/{conversation_id}/attach-document")
+def attach_document(conversation_id: str, payload: AttachDocumentRequest) -> dict:
+    conversation = chat_conversations.get(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    document = get_document_by_id(payload.document_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    documents = add_conversation_document(conversation, document)
+    create_message(
+        conversation_id,
+        "system",
+        f"已将文档《{document['name']}》加入当前对话上下文，可基于该资料继续提问或转为任务。",
+        metadata={
+            "action": "attach_document",
+            "document_id": document["id"],
+            "document_name": document["name"],
+            "dataset": document.get("dataset"),
+        },
+    )
+    return {
+        "conversation": conversation,
+        "messages": chat_messages[conversation_id],
+        "context_documents": documents,
+    }
+
+
 @chat_router.post("/conversations/{conversation_id}/convert-to-task")
 def convert_to_task(conversation_id: str, payload: ConvertToTaskRequest | None = None) -> dict:
     conversation = chat_conversations.get(conversation_id)
@@ -487,16 +592,19 @@ def convert_to_task(conversation_id: str, payload: ConvertToTaskRequest | None =
         raise HTTPException(status_code=404, detail="Conversation not found")
     messages = chat_messages.get(conversation_id, [])
     user_messages = [message for message in messages if message["role"] == "user"]
-    if not user_messages:
+    source_text = payload.instruction if payload and payload.instruction else None
+    if not source_text and not user_messages:
         raise HTTPException(status_code=409, detail="Conversation has no user message")
 
-    source_text = payload.instruction if payload and payload.instruction else user_messages[-1]["content"]
-    protocol = attach_knowledge_refs(parse_command(source_text), source_text)
+    source_text = source_text or user_messages[-1]["content"]
+    protocol = build_task_protocol_from_conversation(source_text, conversation)
     task = persist_task(CommandProtocol(**protocol).as_task_payload())
     task["source"] = {
         "type": "chat",
         "conversation_id": conversation_id,
         "message_id": payload.message_id if payload else None,
+        "document_ids": conversation_document_ids(conversation),
+        "context_documents": conversation.get("context_documents", []),
     }
     conversation["last_task_id"] = task["id"]
     conversation["updated_at"] = utc_now()

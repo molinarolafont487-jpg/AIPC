@@ -1,9 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Database, FilePlus2, RefreshCcw, Search } from "lucide-react";
+import {
+  ArrowRight,
+  ClipboardCheck,
+  Database,
+  FilePlus2,
+  RefreshCcw,
+  Search
+} from "lucide-react";
 import {
   createDocument,
+  createTaskFromKnowledgeSearch,
   listDocumentChunks,
   listDocuments,
   seedDemoDocuments,
@@ -13,7 +21,7 @@ import {
 } from "@/lib/api-client";
 
 type SearchChunk = Awaited<ReturnType<typeof searchKnowledge>>["chunks"][number];
-const DATASET_OPTIONS = ["全部数据集", "制造企业", "园区", "幻影自用", "对话沉淀", "custom"];
+const DATASET_OPTIONS = ["全部数据集", "制造企业", "园区", "幻影自用", "对话沉淀", "任务归档", "custom"];
 
 export function KnowledgePanel() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -26,7 +34,12 @@ export function KnowledgePanel() {
   const [content, setContent] = useState(
     "客户补充：华星科技预算约8万元，采购周期预计30天，IT负责人关注本地部署和数据不出域。"
   );
+  const [taskCommand, setTaskCommand] = useState(
+    "基于华星科技客户资料和报价表，准备明天下午客户合作方案，让销售小张补充预算，销售助理生成话术，内容助理生成PPT大纲。"
+  );
   const [chunks, setChunks] = useState<SearchChunk[]>([]);
+  const [autoStartTask, setAutoStartTask] = useState(true);
+  const [creatingTask, setCreatingTask] = useState(false);
   const [message, setMessage] = useState("知识库助理用于检索资料并生成引用。");
 
   async function loadDocuments(preferredDocumentId?: string | null) {
@@ -102,6 +115,27 @@ export function KnowledgePanel() {
       setMessage(`找到 ${result.chunks.length} 条可引用片段。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "检索失败。");
+    }
+  }
+
+  async function handleCreateTaskFromKnowledge() {
+    setCreatingTask(true);
+    setMessage("正在生成带知识库引用的任务卡...");
+    try {
+      const result = await createTaskFromKnowledgeSearch({
+        command: taskCommand,
+        knowledge_query: query,
+        dataset: searchDataset === "全部数据集" ? undefined : searchDataset,
+        top_k: 5,
+        auto_confirm: autoStartTask,
+        auto_start: autoStartTask
+      });
+      setMessage(`任务卡已生成：${result.task.title}`);
+      window.location.assign(`/tasks?task=${result.task_id}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "知识库引用任务创建失败。");
+    } finally {
+      setCreatingTask(false);
     }
   }
 
@@ -267,6 +301,46 @@ export function KnowledgePanel() {
             </button>
           </div>
           <p className="mt-3 text-sm text-slate-500">{message}</p>
+
+          <div className="mt-4 rounded-md border border-line p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck size={17} className="text-accent" />
+                <h3 className="text-sm font-semibold">引用任务卡</h3>
+              </div>
+              <span className="rounded bg-mist px-2 py-1 text-xs text-slate-500">
+                {chunks.length} 条当前引用
+              </span>
+            </div>
+            <textarea
+              className="min-h-24 w-full resize-none rounded-md border border-line px-3 py-2 text-sm leading-6 outline-none focus:border-accent"
+              value={taskCommand}
+              onChange={(event) => setTaskCommand(event.target.value)}
+            />
+            <label className="mt-3 flex items-start gap-2 rounded-md bg-mist p-3 text-xs leading-5 text-slate-600">
+              <input
+                checked={autoStartTask}
+                className="mt-1"
+                type="checkbox"
+                onChange={(event) => setAutoStartTask(event.target.checked)}
+              />
+              <span>
+                生成后自动确认并启动数字员工，任务中心会直接进入等待真人或老板确认状态。
+              </span>
+            </label>
+            <button
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={creatingTask || !taskCommand.trim()}
+              onClick={() => void handleCreateTaskFromKnowledge()}
+            >
+              <ArrowRight size={15} />
+              {creatingTask
+                ? "生成中"
+                : autoStartTask
+                  ? "生成并启动引用任务"
+                  : "生成引用任务卡"}
+            </button>
+          </div>
 
           <div className="mt-5 space-y-3">
             {chunks.map((chunk) => (

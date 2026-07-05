@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Archive,
   BarChart3,
@@ -19,6 +20,7 @@ import {
 import {
   approveTask,
   archiveTask,
+  confirmTask,
   dispatchTaskAgents,
   getTask,
   getTaskResultPackage,
@@ -26,6 +28,7 @@ import {
   runGoldenDemoLoop,
   sendFeishuMessage,
   simulateFeishuReply,
+  startTask,
   type AgentRun,
   type Task,
   type TaskEvent,
@@ -43,6 +46,13 @@ const statusLabels: Record<string, string> = {
   canceled: "已取消"
 };
 
+function taskSourceLabel(task: Task) {
+  if (!task.source) return "AI指挥台";
+  if (task.source.type === "chat") return "AI对话中心";
+  if (task.source.type === "knowledge") return "企业知识库";
+  return "系统生成";
+}
+
 export function TasksPanel() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -54,6 +64,7 @@ export function TasksPanel() {
   const [runningAgents, setRunningAgents] = useState(false);
   const [feishuLoading, setFeishuLoading] = useState(false);
   const [closingTask, setClosingTask] = useState(false);
+  const [startingTask, setStartingTask] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [approvalComment, setApprovalComment] = useState(
     "老板确认：预算信息已补充，客户方案可以作为演示结果归档。"
@@ -164,6 +175,23 @@ export function TasksPanel() {
     }
   }
 
+  async function handleConfirmAndStartTask() {
+    if (!selectedTask) return;
+    setStartingTask(true);
+    setMessage("正在确认任务并启动数字员工...");
+    try {
+      await confirmTask(selectedTask.id, "老板在任务中心确认执行。");
+      const result = await startTask(selectedTask.id);
+      await refreshSelectedTask(result.task_id);
+      await refreshTaskList();
+      setMessage("任务已确认并启动，数字员工开始执行。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "任务启动失败。");
+    } finally {
+      setStartingTask(false);
+    }
+  }
+
   async function handleSimulateReply() {
     if (!selectedTask) return;
     const sender = selectedTask.command_protocol.human_collaborators[0] || "销售小张";
@@ -208,7 +236,7 @@ export function TasksPanel() {
       const result = await archiveTask(selectedTask.id);
       await refreshSelectedTask(result.task_id);
       await refreshTaskList();
-      setMessage("任务已归档到任务中心，完整闭环演示完成。");
+      setMessage("任务结果包已归档到企业知识库，完整闭环演示完成。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "任务归档失败。");
     } finally {
@@ -290,6 +318,7 @@ export function TasksPanel() {
       done: selectedTask?.status === "archived"
     }
   ];
+  const sourceDocuments = selectedTask?.source?.context_documents || [];
 
   return (
     <div className="grid gap-5 p-5 xl:grid-cols-[420px_1fr]">
@@ -407,6 +436,7 @@ export function TasksPanel() {
             <div className="grid gap-3 md:grid-cols-2">
               {[
                 ["任务ID", selectedTask.id],
+                ["来源", taskSourceLabel(selectedTask)],
                 ["任务类型", selectedTask.type],
                 ["状态", statusLabels[selectedTask.status] || selectedTask.status],
                 ["主责Agent", selectedTask.command_protocol.primary_agent],
@@ -418,6 +448,75 @@ export function TasksPanel() {
                 </div>
               ))}
             </div>
+
+            {selectedTask.status === "pending_confirm" ? (
+              <div className="rounded-md border border-line bg-[#e9f6f5] p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">待老板确认执行</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">
+                      该任务已生成任务卡和引用资料，确认后会分配数字员工并进入任务状态流。
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={startingTask}
+                    onClick={() => void handleConfirmAndStartTask()}
+                  >
+                    <Play size={15} />
+                    {startingTask ? "启动中" : "确认并启动"}
+                  </button>
+                </div>
+                {selectedTask.source?.type === "knowledge" ? (
+                  <div className="rounded-md bg-white p-3 text-xs leading-5 text-slate-600">
+                    来源检索：{selectedTask.source.query || "暂无"} /{" "}
+                    {selectedTask.source.dataset || "全部数据集"}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {sourceDocuments.length || selectedTask.archive_document_id ? (
+              <div className="rounded-md border border-line p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <FileText size={17} className="text-accent" />
+                    <h3 className="text-sm font-semibold">任务资料链路</h3>
+                  </div>
+                  {selectedTask.archive_document_id ? (
+                    <Link
+                      className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
+                      href="/knowledge"
+                    >
+                      查看归档知识库
+                    </Link>
+                  ) : null}
+                </div>
+
+                {sourceDocuments.length ? (
+                  <div className="mb-3 grid gap-3 lg:grid-cols-2">
+                    {sourceDocuments.map((document) => (
+                      <article className="rounded-md bg-mist p-3" key={document.id}>
+                        <div className="text-sm font-semibold">{document.name}</div>
+                        <div className="mt-1 text-xs leading-5 text-slate-500">
+                          {document.dataset} / {document.file_type} / {document.chunk_count} chunks
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+
+                {selectedTask.archive_document_id ? (
+                  <div className="rounded-md bg-[#e9f6f5] p-3 text-xs leading-5 text-slate-700">
+                    归档文档ID：{selectedTask.archive_document_id}
+                  </div>
+                ) : (
+                  <div className="rounded-md bg-mist p-3 text-xs leading-5 text-slate-600">
+                    老板确认并点击归档后，系统会把结果包写入“任务归档”数据集。
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {resultPackage ? (
               <div className="rounded-md border border-line p-4">

@@ -21,6 +21,7 @@ import {
   updateTaskProtocol,
   type CommandProtocol
 } from "@/lib/api-client";
+import { DocumentUploadEntry } from "@/components/document-upload-entry";
 import { agents, stats, timeline } from "@/lib/demo-data";
 
 const defaultCommand =
@@ -244,6 +245,18 @@ export function CommandCenter() {
             ))}
           </div>
         </section>
+
+        <DocumentUploadEntry
+          sourceEntry="command_center"
+          onUploaded={(document) => {
+            setMessage(`文档已入库：${document.name}，可以基于它生成任务卡。`);
+            setCommand((current) =>
+              current.includes(document.name)
+                ? current
+                : `基于《${document.name}》，${current}`
+            );
+          }}
+        />
 
         <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {stats.map((stat) => (

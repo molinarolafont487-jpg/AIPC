@@ -85,6 +85,51 @@ export type Agent = {
   tools: string[];
   status: string;
   prompt_config?: AgentRun["prompt_config"];
+  profile?: AgentProfile;
+};
+
+export type AgentProfile = {
+  permissions: string[];
+  human_collaborators: string[];
+  routing_types: string[];
+  task_templates: Array<{
+    title: string;
+    trigger: string;
+    task_type: string;
+    expected_outputs: string[];
+  }>;
+  quota: {
+    daily_limit: number;
+    unit: string;
+  };
+  usage: {
+    task_runs: number;
+    direct_runs: number;
+    active_tasks: number;
+    waiting_human: number;
+    used_today: number;
+    remaining_today: number;
+  };
+  recent_runs: Array<{
+    id: string;
+    source: "task" | "direct";
+    status: string;
+    title: string;
+    artifacts: string[];
+    created_at: string;
+  }>;
+};
+
+export type DirectAgentRun = {
+  run_id: string;
+  agent_id: string;
+  agent_name: string;
+  status: string;
+  created_at: string;
+  prompt_config: AgentRun["prompt_config"];
+  output: string;
+  artifacts: string[];
+  input: Record<string, unknown>;
 };
 
 export type Task = {
@@ -96,6 +141,16 @@ export type Task = {
   command_protocol: CommandProtocol;
   primary_agent_id: string | null;
   approval_required: boolean;
+  archive_document_id?: string;
+  source?: {
+    type: "chat" | "knowledge";
+    conversation_id?: string;
+    message_id?: string | null;
+    document_ids?: string[];
+    context_documents?: ChatContextDocument[];
+    query?: string;
+    dataset?: string | null;
+  };
   created_at: string;
   updated_at: string;
 };
@@ -208,10 +263,20 @@ export type ChatConversation = {
   agent_name: string | null;
   model_key: string;
   dataset: string | null;
+  context_documents?: ChatContextDocument[];
   last_task_id?: string;
   last_knowledge_document_id?: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ChatContextDocument = {
+  id: string;
+  name: string;
+  dataset: string;
+  file_type: string;
+  chunk_count: number;
+  created_at: string;
 };
 
 export type ChatMessage = {
@@ -282,6 +347,27 @@ export type DocumentItem = {
   updated_at?: string;
 };
 
+export type WorkspaceMember = {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  role_id: string;
+  display_name: string;
+  feishu_user_id: string;
+  status: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+  };
+  role: {
+    id: string;
+    key: string;
+    name: string;
+    permissions: string[];
+  };
+};
+
 export type DocumentChunk = {
   id: string;
   document_id: string;
@@ -319,6 +405,21 @@ export async function listAgents() {
     throw new Error("无法读取数字员工。");
   }
   return (await response.json()) as { items: Agent[]; total: number };
+}
+
+export async function runAgent(
+  agentId: string,
+  payload: { input: Record<string, unknown>; context?: Record<string, unknown> }
+) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/agents/${agentId}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("数字员工试运行失败。");
+  }
+  return (await response.json()) as DirectAgentRun;
 }
 
 export async function parseCommand(input: string) {
@@ -363,6 +464,29 @@ export async function createTask(commandProtocol: CommandProtocol) {
   });
   if (!response.ok) {
     throw new Error("任务创建失败。");
+  }
+  return (await response.json()) as {
+    task_id: string;
+    status: string;
+    task: Task;
+  };
+}
+
+export async function createTaskFromKnowledgeSearch(payload: {
+  command: string;
+  knowledge_query?: string;
+  dataset?: string;
+  top_k?: number;
+  auto_confirm?: boolean;
+  auto_start?: boolean;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/from-knowledge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("知识库引用任务创建失败。");
   }
   return (await response.json()) as {
     task_id: string;
@@ -574,6 +698,28 @@ export async function sendChatMessage(
   };
 }
 
+export async function attachChatDocument(
+  conversationId: string,
+  documentId: string
+) {
+  const response = await fetch(
+    `${API_BASE_URL}/api/v1/chat/conversations/${conversationId}/attach-document`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_id: documentId })
+    }
+  );
+  if (!response.ok) {
+    throw new Error("文档加入对话上下文失败。");
+  }
+  return (await response.json()) as {
+    conversation: ChatConversation;
+    messages: ChatMessage[];
+    context_documents: ChatContextDocument[];
+  };
+}
+
 export async function convertChatToTask(
   conversationId: string,
   payload?: { message_id?: string; instruction?: string }
@@ -707,6 +853,7 @@ export async function createDocument(payload: {
   file_type: string;
   dataset: string;
   content: string;
+  metadata?: Record<string, unknown>;
   auto_ingest?: boolean;
 }) {
   const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
@@ -718,6 +865,28 @@ export async function createDocument(payload: {
     throw new Error("文档入库失败。");
   }
   return (await response.json()) as { document: DocumentItem };
+}
+
+export async function uploadDocumentFile(payload: {
+  filename: string;
+  dataset: string;
+  content_base64: string;
+  metadata?: Record<string, unknown>;
+  auto_ingest?: boolean;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("完整文档上传失败。");
+  }
+  return (await response.json()) as {
+    document: DocumentItem;
+    extracted_chars: number;
+    file_type: string;
+  };
 }
 
 export async function seedDemoDocuments(reset = true) {
@@ -798,4 +967,16 @@ export async function getSeedStatus() {
     counts: Record<string, number>;
     demo_login: { email: string; password: string };
   };
+}
+
+export async function listWorkspaceMembers() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/workspaces/current/members`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error("无法读取真人员工。");
+  }
+
+  return (await response.json()) as { items: WorkspaceMember[]; total: number };
 }

@@ -7,6 +7,7 @@ import {
   Bot,
   Brain,
   Database,
+  FileText,
   FilePlus2,
   MessageSquareText,
   RefreshCcw,
@@ -14,6 +15,7 @@ import {
   Sparkles
 } from "lucide-react";
 import {
+  attachChatDocument,
   convertChatToTask,
   createChatConversation,
   getChatConversation,
@@ -21,9 +23,12 @@ import {
   saveChatToKnowledge,
   sendChatMessage,
   type ChatConversation,
+  type ChatContextDocument,
   type ChatMessage,
-  type ChatMode
+  type ChatMode,
+  type DocumentItem
 } from "@/lib/api-client";
+import { DocumentUploadEntry } from "@/components/document-upload-entry";
 
 const modeOptions: Array<{
   key: ChatMode;
@@ -37,7 +42,7 @@ const modeOptions: Array<{
 ];
 
 const agentOptions = ["老板助理", "运营助理", "销售助理", "知识库助理", "内容助理", "代码助理"];
-const datasetOptions = ["自动判断", "制造企业", "园区", "幻影自用", "对话沉淀"];
+const datasetOptions = ["自动判断", "制造企业", "园区", "幻影自用", "对话沉淀", "任务归档", "custom"];
 
 const defaultPrompt = "帮我分析一下华星科技这个客户有没有成交机会，并看看知识库里有没有类似案例。";
 
@@ -172,6 +177,36 @@ export function ChatCenter() {
     }
   }
 
+  async function handleActionToTask(actionKey: string, actionLabel: string, messageId?: string) {
+    if (!selectedConversation) return;
+    const actionInstructions: Record<string, string> = {
+      assign_agent:
+        "请把这段对话整理成一个可以交给数字员工执行的任务卡，明确主责数字员工、协作数字员工、需要调用资料、真人协作人和老板确认事项。",
+      ppt_outline:
+        "请基于这段对话生成PPT大纲任务卡，主责为内容助理，协作知识库助理和老板助理，输出PPT结构、页面标题、关键素材和风险提示。",
+      customer_email:
+        "请基于这段对话生成客户邮件任务卡，主责为销售助理，协作知识库助理和老板助理，输出客户邮件草稿、跟进话术和需要老板确认的报价边界。"
+    };
+    setConverting(true);
+    setNotice(`正在把“${actionLabel}”生成任务卡...`);
+    try {
+      const result = await convertChatToTask(selectedConversation.id, {
+        message_id: messageId,
+        instruction: actionInstructions[actionKey] || `请将“${actionLabel}”整理成任务卡。`
+      });
+      setMessages(result.messages);
+      setSelectedConversation(result.conversation);
+      setLastTaskId(result.task_id);
+      setLastKnowledgeDocumentId(result.conversation.last_knowledge_document_id || null);
+      await loadConversations(result.conversation.id);
+      setNotice(`已生成任务卡：${result.task.title}，可进入任务中心确认执行。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : `${actionLabel}生成任务卡失败。`);
+    } finally {
+      setConverting(false);
+    }
+  }
+
   async function handleSaveToKnowledge(messageId?: string) {
     if (!selectedConversation) return;
     setSavingKnowledge(true);
@@ -193,11 +228,63 @@ export function ChatCenter() {
     }
   }
 
+  async function handleAttachUploadedDocument(document: DocumentItem) {
+    setNotice("正在把文档加入当前对话上下文...");
+    try {
+      const conversation = await ensureConversation();
+      const result = await attachChatDocument(conversation.id, document.id);
+      setSelectedConversation(result.conversation);
+      setMessages(result.messages);
+      setLastKnowledgeDocumentId(document.id);
+      setMode("knowledge");
+      setDataset(document.dataset || "custom");
+      setInput(
+        `基于《${document.name}》，请先总结核心内容、提炼可执行建议，并指出可以转成哪些任务。`
+      );
+      await loadConversations(result.conversation.id);
+      setNotice(`文档已加入当前对话：${document.name}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "文档加入对话上下文失败。");
+    }
+  }
+
+  function fillDocumentPrompt(document: ChatContextDocument, intent: "summary" | "task") {
+    setMode("knowledge");
+    setDataset(document.dataset || "custom");
+    setInput(
+      intent === "summary"
+        ? `基于《${document.name}》，请总结核心内容、关键数据、风险点和下一步建议。`
+        : `基于《${document.name}》，请生成一个可以交给数字员工执行的任务指令，包含目标、协作员工、需要资料和预期输出。`
+    );
+  }
+
+  async function handleConvertDocumentToTask(document: ChatContextDocument) {
+    if (!selectedConversation) return;
+    setConverting(true);
+    setNotice("正在基于当前资料生成任务卡...");
+    try {
+      const result = await convertChatToTask(selectedConversation.id, {
+        instruction: `基于《${document.name}》，生成一个可以交给数字员工执行的任务卡。任务需要包含目标、主责数字员工、协作数字员工、协作真人员工、需要调用资料、预计输出、风险提示和老板确认事项。`
+      });
+      setMessages(result.messages);
+      setSelectedConversation(result.conversation);
+      setLastTaskId(result.task_id);
+      setLastKnowledgeDocumentId(result.conversation.last_knowledge_document_id || null);
+      await loadConversations(result.conversation.id);
+      setNotice(`已基于《${document.name}》生成任务卡：${result.task.title}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "资料生成任务卡失败。");
+    } finally {
+      setConverting(false);
+    }
+  }
+
   const latestAssistant = useMemo(
     () => [...messages].reverse().find((message) => message.role === "assistant"),
     [messages]
   );
   const knowledgeRefs = latestAssistant?.metadata.knowledge_refs || [];
+  const contextDocuments = selectedConversation?.context_documents || [];
 
   return (
     <div className="grid min-h-[calc(100vh-64px)] gap-5 p-5 xl:grid-cols-[300px_1fr_340px]">
@@ -343,7 +430,7 @@ export function ChatCenter() {
                             void handleSaveToKnowledge(message.id);
                             return;
                           }
-                          setNotice(`${action.label} 已记录为下一步动作，后续会接入正式执行。`);
+                          void handleActionToTask(action.key, action.label, message.id);
                         }}
                       >
                         {action.key === "convert_task" ? (
@@ -416,6 +503,15 @@ export function ChatCenter() {
           </p>
         </div>
 
+        <DocumentUploadEntry
+          compact
+          defaultDataset={dataset === "自动判断" ? "制造企业" : dataset}
+          sourceEntry="chat_center"
+          onUploaded={(document) => {
+            void handleAttachUploadedDocument(document);
+          }}
+        />
+
         <div className="rounded-md border border-line p-3">
           <div className="mb-2 text-xs font-medium text-slate-500">当前链路</div>
           <div className="space-y-2 text-sm text-slate-700">
@@ -463,6 +559,56 @@ export function ChatCenter() {
             <ArrowRight size={15} />
           </Link>
         ) : null}
+
+        <div className="rounded-md bg-mist p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-2 text-xs font-medium text-slate-500">
+              <FileText size={14} />
+              当前对话资料
+            </div>
+            <span className="rounded bg-white px-2 py-1 text-[11px] text-slate-500">
+              {contextDocuments.length} 份
+            </span>
+          </div>
+          {contextDocuments.length ? (
+            <div className="space-y-2">
+              {contextDocuments.map((document) => (
+                <article className="rounded-md bg-white p-2" key={document.id}>
+                  <div className="text-xs font-medium text-slate-700">{document.name}</div>
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    {document.dataset} / {document.file_type} / {document.chunk_count} chunks
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      className="rounded-md border border-line px-2 py-1.5 text-xs text-slate-600 hover:border-accent hover:text-accent"
+                      onClick={() => fillDocumentPrompt(document, "summary")}
+                    >
+                      总结资料
+                    </button>
+                    <button
+                      className="rounded-md border border-line px-2 py-1.5 text-xs text-slate-600 hover:border-accent hover:text-accent"
+                      onClick={() => fillDocumentPrompt(document, "task")}
+                    >
+                      形成任务指令
+                    </button>
+                  </div>
+                  <button
+                    className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md bg-ink px-2 py-1.5 text-xs text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={converting}
+                    onClick={() => void handleConvertDocumentToTask(document)}
+                  >
+                    <FilePlus2 size={13} />
+                    生成任务卡
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm leading-6 text-slate-500">
+              上传文档后会加入当前对话，后续问答会优先检索这些资料。
+            </p>
+          )}
+        </div>
 
         <div className="rounded-md bg-mist p-3">
           <div className="mb-2 text-xs font-medium text-slate-500">可调用资料</div>

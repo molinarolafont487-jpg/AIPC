@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import io
 import math
 import re
+import zipfile
+from html import unescape
 from typing import Any
+from xml.etree import ElementTree
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -24,9 +30,19 @@ class CreateDocumentRequest(BaseModel):
     auto_ingest: bool = True
 
 
+class UploadDocumentRequest(BaseModel):
+    filename: str = Field(min_length=1)
+    dataset: str = "custom"
+    content_base64: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    auto_ingest: bool = True
+
+
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 5
+    limit: int | None = None
+    dataset: str | None = None
     filters: dict | None = None
 
 
@@ -116,6 +132,128 @@ def upsert_document(payload: CreateDocumentRequest) -> dict[str, Any]:
     return document
 
 
+def clean_extracted_text(text: str) -> str:
+    text = unescape(text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def decode_text_bytes(data: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1", errors="ignore")
+
+
+def xml_text(xml_bytes: bytes) -> str:
+    try:
+        root = ElementTree.fromstring(xml_bytes)
+    except ElementTree.ParseError:
+        return clean_extracted_text(decode_text_bytes(xml_bytes))
+    return clean_extracted_text("\n".join(root.itertext()))
+
+
+def extract_zip_xml_text(
+    data: bytes,
+    member_filter: Any,
+) -> str:
+    parts: list[str] = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            for name in sorted(archive.namelist()):
+                if member_filter(name):
+                    parts.append(xml_text(archive.read(name)))
+    except zipfile.BadZipFile as error:
+        raise HTTPException(status_code=400, detail="Unsupported or broken office file") from error
+    return clean_extracted_text("\n".join(part for part in parts if part))
+
+
+def extract_docx_text(data: bytes) -> str:
+    prefixes = (
+        "word/document",
+        "word/header",
+        "word/footer",
+        "word/footnotes",
+        "word/endnotes",
+        "word/comments",
+    )
+    return extract_zip_xml_text(
+        data,
+        lambda name: name.endswith(".xml") and name.startswith(prefixes),
+    )
+
+
+def extract_pptx_text(data: bytes) -> str:
+    return extract_zip_xml_text(
+        data,
+        lambda name: name.endswith(".xml")
+        and (
+            name.startswith("ppt/slides/slide")
+            or name.startswith("ppt/notesSlides/notesSlide")
+        ),
+    )
+
+
+def extract_xlsx_text(data: bytes) -> str:
+    return extract_zip_xml_text(
+        data,
+        lambda name: name.endswith(".xml")
+        and (
+            name == "xl/sharedStrings.xml"
+            or name.startswith("xl/worksheets/sheet")
+        ),
+    )
+
+
+def extract_pdf_text(data: bytes) -> str:
+    decoded = decode_text_bytes(data)
+    literal_strings = re.findall(r"\(([^()]{2,500})\)", decoded)
+    if literal_strings:
+        literal_text = "\n".join(
+            item.replace(r"\(", "(").replace(r"\)", ")").replace(r"\n", "\n")
+            for item in literal_strings
+        )
+        cleaned = clean_extracted_text(literal_text)
+        if len(cleaned) >= 20:
+            return cleaned
+    return clean_extracted_text(decoded)
+
+
+def file_type_from_name(filename: str) -> str:
+    if "." not in filename:
+        return "txt"
+    return filename.rsplit(".", 1)[-1].lower()
+
+
+def decode_upload_base64(content_base64: str) -> bytes:
+    raw = content_base64.split(",", 1)[-1]
+    try:
+        return base64.b64decode(raw)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(status_code=400, detail="Invalid base64 file content") from error
+
+
+def extract_uploaded_document_text(filename: str, data: bytes) -> tuple[str, str]:
+    file_type = file_type_from_name(filename)
+    if file_type == "docx":
+        content = extract_docx_text(data)
+    elif file_type == "pptx":
+        content = extract_pptx_text(data)
+    elif file_type == "xlsx":
+        content = extract_xlsx_text(data)
+    elif file_type == "pdf":
+        content = extract_pdf_text(data)
+    else:
+        content = clean_extracted_text(decode_text_bytes(data))
+
+    if not content:
+        raise HTTPException(status_code=400, detail="No text could be extracted")
+    return content, file_type
+
+
 def ingest_content(document: dict[str, Any], content: str) -> None:
     demo_chunks[:] = [chunk for chunk in demo_chunks if chunk["document_id"] != document["id"]]
     chunks = create_chunks(document, content)
@@ -148,9 +286,12 @@ def search_knowledge_refs(
 ) -> list[dict[str, Any]]:
     query_terms = normalize_terms(query)
     dataset_filter = (filters or {}).get("dataset")
+    document_ids_filter = set((filters or {}).get("document_ids") or [])
     scored = []
     for chunk in demo_chunks:
         if dataset_filter and chunk["metadata"].get("dataset") != dataset_filter:
+            continue
+        if document_ids_filter and chunk["document_id"] not in document_ids_filter:
             continue
         score = score_chunk(query_terms, chunk)
         if score > 0:
@@ -170,6 +311,10 @@ def search_knowledge_refs(
         }
         for score, chunk in scored[:top_k]
     ]
+
+
+def get_document_by_id(document_id: str) -> dict[str, Any] | None:
+    return next((item for item in demo_documents if item["id"] == document_id), None)
 
 
 DEMO_DATASETS = [
@@ -478,6 +623,32 @@ def create_document(payload: CreateDocumentRequest) -> dict:
     return {"document": document}
 
 
+@router.post("/documents/upload")
+def upload_document(payload: UploadDocumentRequest) -> dict:
+    data = decode_upload_base64(payload.content_base64)
+    content, file_type = extract_uploaded_document_text(payload.filename, data)
+    document = upsert_document(
+        CreateDocumentRequest(
+            filename=payload.filename,
+            file_type=file_type,
+            dataset=payload.dataset,
+            content=content,
+            metadata={
+                **payload.metadata,
+                "source_type": "file_upload",
+                "original_filename": payload.filename,
+                "extracted_chars": len(content),
+            },
+            auto_ingest=payload.auto_ingest,
+        )
+    )
+    return {
+        "document": document,
+        "extracted_chars": len(content),
+        "file_type": file_type,
+    }
+
+
 @router.post("/documents/seed-demo")
 def seed_demo_documents(payload: SeedRequest) -> dict:
     if payload.reset:
@@ -515,7 +686,14 @@ def list_document_chunks(document_id: str) -> dict:
 
 @router.post("/knowledge/search")
 def search(payload: SearchRequest) -> dict:
-    chunks = search_knowledge_refs(payload.query, payload.top_k, payload.filters)
+    filters = dict(payload.filters or {})
+    if payload.dataset and payload.dataset != "全部数据集":
+        filters.setdefault("dataset", payload.dataset)
+    chunks = search_knowledge_refs(
+        payload.query,
+        payload.limit or payload.top_k,
+        filters or None,
+    )
     return {"answerable": bool(chunks), "query": payload.query, "chunks": chunks}
 
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.agent_runtime import dispatch_task_agents
 from app.core.command_protocol import parse_command
@@ -22,12 +22,23 @@ from app.modules.integrations.feishu import (
     persist_message,
     send_webhook_text,
 )
+from app.modules.knowledge.routes import search_knowledge_refs
+from app.modules.knowledge.routes import CreateDocumentRequest, upsert_document
 
 router = APIRouter()
 
 
 class CreateTaskRequest(BaseModel):
     command_protocol: CommandProtocol
+
+
+class CreateTaskFromKnowledgeRequest(BaseModel):
+    command: str = Field(min_length=1)
+    knowledge_query: str | None = None
+    dataset: str | None = None
+    top_k: int = Field(default=5, ge=1, le=8)
+    auto_confirm: bool = False
+    auto_start: bool = False
 
 
 class UpdateTaskProtocolRequest(BaseModel):
@@ -99,6 +110,31 @@ def persist_task(protocol: dict) -> dict:
     return task
 
 
+def build_protocol_from_knowledge_search(
+    payload: CreateTaskFromKnowledgeRequest,
+) -> dict:
+    protocol = parse_command(payload.command)
+    query = payload.knowledge_query or " ".join(
+        [
+            payload.command,
+            protocol.get("task_title", ""),
+            protocol.get("task_goal", ""),
+            *protocol.get("input_sources", []),
+            *protocol.get("expected_outputs", []),
+        ]
+    )
+    filters = (
+        {"dataset": payload.dataset}
+        if payload.dataset and payload.dataset != "全部数据集"
+        else None
+    )
+    refs = search_knowledge_refs(query, top_k=payload.top_k, filters=filters)
+    if not refs:
+        enriched = attach_knowledge_refs(protocol, payload.command)
+        refs = enriched.get("knowledge_refs", [])
+    return {**protocol, "knowledge_refs": refs}
+
+
 def start_task_execution(task: dict) -> list[dict]:
     task["status"] = (
         "waiting_human"
@@ -160,7 +196,29 @@ def approve_task_result(task: dict, comment: str) -> None:
 def archive_task_result(task: dict) -> None:
     task["status"] = "archived"
     task["updated_at"] = utc_now()
-    add_task_event(task["id"], "task.archived", "任务已归档到任务中心。")
+    result_package = build_task_result_package(task["id"])
+    document = upsert_document(
+        CreateDocumentRequest(
+            filename=f"{task['title']}-归档结果包.md",
+            file_type="md",
+            dataset="任务归档",
+            content=result_package["copy_text"],
+            metadata={
+                "source_type": "task_archive",
+                "task_id": task["id"],
+                "task_status": task["status"],
+                "source": task.get("source", {}),
+            },
+            auto_ingest=True,
+        )
+    )
+    task["archive_document_id"] = document["id"]
+    add_task_event(
+        task["id"],
+        "task.archived",
+        "任务已归档到任务中心，并沉淀为企业知识库文档。",
+        metadata={"document_id": document["id"], "document_name": document["name"]},
+    )
 
 
 def build_task_result_package(task_id: str) -> dict:
@@ -250,6 +308,36 @@ def build_task_result_package(task_id: str) -> dict:
 def create_task(payload: CreateTaskRequest) -> dict:
     protocol = payload.command_protocol.as_task_payload()
     task = persist_task(protocol)
+    return {"task_id": task["id"], "status": task["status"], "task": task}
+
+
+@router.post("/from-knowledge")
+def create_task_from_knowledge(payload: CreateTaskFromKnowledgeRequest) -> dict:
+    protocol = CommandProtocol(
+        **build_protocol_from_knowledge_search(payload)
+    ).as_task_payload()
+    task = persist_task(protocol)
+    refs = protocol.get("knowledge_refs", [])
+    query = payload.knowledge_query or payload.command
+    add_task_event(
+        task["id"],
+        "knowledge.search_applied",
+        f"已基于知识库检索生成任务卡，关联 {len(refs)} 条引用。",
+        metadata={
+            "query": query,
+            "dataset": payload.dataset,
+            "knowledge_refs": refs,
+        },
+    )
+    task["source"] = {
+        "type": "knowledge",
+        "query": query,
+        "dataset": payload.dataset,
+    }
+    if payload.auto_confirm or payload.auto_start:
+        confirm_task_execution(task, "老板确认执行知识库引用任务。")
+    if payload.auto_start:
+        start_task_execution(task)
     return {"task_id": task["id"], "status": task["status"], "task": task}
 
 
