@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.agent_runtime import AGENT_PROMPT_CONFIGS
 from app.core.command_protocol import parse_command
+from app.core.config import settings
 from app.core.demo_store import (
     ADMIN_USER_ID,
     WORKSPACE_ID,
@@ -25,30 +27,6 @@ chat_router = APIRouter()
 model_router = APIRouter()
 
 ChatMode = Literal["general", "knowledge", "agent", "model"]
-
-MODEL_CATALOG = {
-    "local-balanced": {
-        "name": "本地均衡模型",
-        "provider": "local",
-        "quality": "balanced",
-        "unit_cost": 0.0,
-        "status": "online",
-    },
-    "local-private": {
-        "name": "本地隐私优先模型",
-        "provider": "local",
-        "quality": "private",
-        "unit_cost": 0.0,
-        "status": "online",
-    },
-    "cloud-quality": {
-        "name": "云端高质量模型",
-        "provider": "cloud",
-        "quality": "high",
-        "unit_cost": 0.006,
-        "status": "standby",
-    },
-}
 
 
 class CreateConversationRequest(BaseModel):
@@ -76,8 +54,47 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 2)
 
 
+def has_real_model_config() -> bool:
+    return bool(settings.model_base_url and settings.model_api_key and settings.model_api_key != "local-dev")
+
+
+def get_model_catalog() -> dict[str, dict[str, Any]]:
+    real_model_status = "online" if has_real_model_config() else "standby"
+    real_model_name = (
+        f"NewAPI云端模型 / {settings.model_chat_model}"
+        if has_real_model_config()
+        else "云端高质量模型"
+    )
+    return {
+        "local-balanced": {
+            "name": "本地均衡模型",
+            "provider": "local",
+            "quality": "balanced",
+            "unit_cost": 0.0,
+            "status": "online",
+        },
+        "local-private": {
+            "name": "本地隐私优先模型",
+            "provider": "local",
+            "quality": "private",
+            "unit_cost": 0.0,
+            "status": "online",
+        },
+        "cloud-quality": {
+            "name": real_model_name,
+            "provider": "cloud",
+            "quality": "high",
+            "unit_cost": 0.006,
+            "status": real_model_status,
+        },
+    }
+
+
 def select_model(mode: str, requested_model: str | None, content: str) -> str:
-    if requested_model in MODEL_CATALOG:
+    catalog = get_model_catalog()
+    if has_real_model_config():
+        return "cloud-quality"
+    if requested_model in catalog:
         return requested_model
     if mode == "knowledge" or any(keyword in content for keyword in ["资料", "知识库", "案例", "合同"]):
         return "local-private"
@@ -201,16 +218,80 @@ def generate_answer(
     return answer, refs, actions
 
 
+def completion_url() -> str:
+    base_url = settings.model_base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return f"{base_url}/chat/completions"
+    return f"{base_url}/v1/chat/completions"
+
+
+def build_system_prompt(mode: str, agent_name: str | None, refs: list[dict[str, Any]]) -> str:
+    ref_text = summarize_refs(refs)
+    agent_config = AGENT_PROMPT_CONFIGS.get(agent_name or "")
+    agent_text = (
+        f"当前指定数字员工：{agent_name}。岗位：{agent_config['role_description']}。边界：{agent_config['duty_boundary']}。"
+        if agent_config
+        else "未指定数字员工时，以企业AI助手身份回答。"
+    )
+    return "\n".join(
+        [
+            "你是 Phantom AI Workstation 的企业AI对话中心。",
+            "你要用简洁、专业的中文回答，优先服务企业内部问答、客户分析、内容创作和对话转任务。",
+            "AI对话中心负责认知与创作，正式执行、真人协同、老板确认和归档应建议用户转入任务中心。",
+            f"当前对话模式：{mode}。",
+            agent_text,
+            "如有企业知识库引用，必须基于引用回答并指出资料缺口，不要编造客户预算、合同条款或未提供事实。",
+            "企业知识库引用：",
+            ref_text,
+        ]
+    )
+
+
+def call_chat_completion(
+    content: str,
+    mode: str,
+    agent_name: str | None,
+    refs: list[dict[str, Any]],
+) -> tuple[str, dict[str, int]]:
+    payload = {
+        "model": settings.model_chat_model,
+        "messages": [
+            {"role": "system", "content": build_system_prompt(mode, agent_name, refs)},
+            {"role": "user", "content": content},
+        ],
+        "temperature": 0.4,
+    }
+    response = httpx.post(
+        completion_url(),
+        headers={
+            "Authorization": f"Bearer {settings.model_api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=30,
+    )
+    response.raise_for_status()
+    data = response.json()
+    answer = data["choices"][0]["message"]["content"]
+    usage = data.get("usage", {})
+    return answer, {
+        "input_tokens": int(usage.get("prompt_tokens") or estimate_tokens(content)),
+        "output_tokens": int(usage.get("completion_tokens") or estimate_tokens(answer)),
+    }
+
+
 def record_usage(
     conversation_id: str,
     model_key: str,
     mode: str,
     prompt: str,
     answer: str,
+    actual_usage: dict[str, int] | None = None,
+    status: str = "succeeded",
 ) -> dict[str, Any]:
-    model = MODEL_CATALOG[model_key]
-    input_tokens = estimate_tokens(prompt)
-    output_tokens = estimate_tokens(answer)
+    model = get_model_catalog()[model_key]
+    input_tokens = actual_usage["input_tokens"] if actual_usage else estimate_tokens(prompt)
+    output_tokens = actual_usage["output_tokens"] if actual_usage else estimate_tokens(answer)
     cost = round(((input_tokens + output_tokens) / 1000) * model["unit_cost"], 4)
     record = {
         "id": new_id("use"),
@@ -223,6 +304,7 @@ def record_usage(
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "estimated_cost": cost,
+        "status": status,
         "created_at": utc_now(),
     }
     model_usage_records.append(record)
@@ -289,7 +371,35 @@ def send_message(conversation_id: str, payload: SendMessageRequest) -> dict:
         payload.agent_name,
         payload.dataset,
     )
-    usage = record_usage(conversation_id, model_key, payload.mode, payload.content, answer)
+    generation_meta: dict[str, Any] = {"generation": "fallback"}
+    actual_usage: dict[str, int] | None = None
+    usage_status = "fallback"
+    if has_real_model_config():
+        try:
+            answer, actual_usage = call_chat_completion(
+                payload.content,
+                payload.mode,
+                payload.agent_name,
+                refs,
+            )
+            generation_meta = {"generation": "real", "base_url": settings.model_base_url}
+            usage_status = "succeeded"
+        except httpx.HTTPError as error:
+            generation_meta = {
+                "generation": "fallback",
+                "model_error": str(error),
+                "base_url": settings.model_base_url,
+            }
+    usage = record_usage(
+        conversation_id,
+        model_key,
+        payload.mode,
+        payload.content,
+        answer,
+        actual_usage=actual_usage,
+        status=usage_status,
+    )
+    catalog = get_model_catalog()
     assistant_message = create_message(
         conversation_id,
         "assistant",
@@ -298,10 +408,11 @@ def send_message(conversation_id: str, payload: SendMessageRequest) -> dict:
             "mode": payload.mode,
             "agent_name": payload.agent_name,
             "model_key": model_key,
-            "model_name": MODEL_CATALOG[model_key]["name"],
+            "model_name": catalog[model_key]["name"],
             "knowledge_refs": refs,
             "actions": actions,
             "usage_id": usage["id"],
+            **generation_meta,
         },
     )
     conversation["mode"] = payload.mode
@@ -364,7 +475,7 @@ def model_router_status() -> dict:
     local_calls = len([item for item in model_usage_records if item["provider"] == "local"])
     cloud_calls = len([item for item in model_usage_records if item["provider"] == "cloud"])
     by_model = []
-    for key, model in MODEL_CATALOG.items():
+    for key, model in get_model_catalog().items():
         records = [item for item in model_usage_records if item["model_key"] == key]
         by_model.append(
             {

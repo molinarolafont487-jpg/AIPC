@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     model_provider: str = "openai-compatible"
     model_base_url: str = "http://localhost:11434/v1"
     model_api_key: str = "local-dev"
+    model_chat_model: str = "qwen2.5:14b"
     local_llm_model: str = "qwen2.5:14b"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimension: int = 1536

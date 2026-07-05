@@ -59,6 +59,19 @@ FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-tok
 
 未配置时，任务中心的“发送补充请求”和“模拟小张回复并回流”仍可完整演示任务状态、消息审计和 Agent 继续执行。
 
+## 大模型通道
+
+AI对话中心默认使用本地降级回答。若要接入 OpenAI-compatible / NewAPI 通道，在本机 `.env` 中配置：
+
+```bash
+MODEL_PROVIDER=openai-compatible
+MODEL_BASE_URL=https://your-openai-compatible-host
+MODEL_API_KEY=your-api-key
+MODEL_CHAT_MODEL=deepseek-v4-flash
+```
+
+`MODEL_CHAT_MODEL` 请使用通道 `/v1/models` 返回的可用文本模型；`.env` 已被 git 忽略，不要把真实密钥提交到仓库。
+
 任务中心提供“跑完整Demo”入口，可一键执行黄金链路：
 
 ```text
