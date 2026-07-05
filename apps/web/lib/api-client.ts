@@ -36,6 +36,64 @@ export type MeResponse = {
   permissions: string[];
 };
 
+export type CommandProtocol = {
+  task_title: string;
+  task_goal: string;
+  task_type: string;
+  primary_agent: string;
+  collaborating_agents: string[];
+  human_collaborators: string[];
+  input_sources: string[];
+  expected_outputs: string[];
+  deadline: string;
+  approval_required: boolean;
+  risk_level: "low" | "medium" | "high";
+  notification_channel: "飞书";
+  archive_location: string;
+};
+
+export type Agent = {
+  id: string;
+  key: string;
+  name: string;
+  execution_mode: "real" | "semi_auto";
+  description: string;
+  tools: string[];
+  status: string;
+};
+
+export type Task = {
+  id: string;
+  title: string;
+  goal: string;
+  type: string;
+  status: string;
+  command_protocol: CommandProtocol;
+  primary_agent_id: string | null;
+  approval_required: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskEvent = {
+  id: string;
+  task_id: string;
+  event_type: string;
+  actor_type: string;
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+};
+
+export type DocumentItem = {
+  id: string;
+  name: string;
+  file_type: string;
+  parse_status: string;
+  chunk_count: number;
+  created_at: string;
+};
+
 export async function login(email: string, password: string) {
   const response = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
     method: "POST",
@@ -50,6 +108,120 @@ export async function login(email: string, password: string) {
   }
 
   return (await response.json()) as LoginResponse;
+}
+
+export async function listAgents() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/agents`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取数字员工。");
+  }
+  return (await response.json()) as { items: Agent[]; total: number };
+}
+
+export async function parseCommand(input: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/commands/parse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ input })
+  });
+  if (!response.ok) {
+    throw new Error("命令解析失败。");
+  }
+  return (await response.json()) as { command_protocol: CommandProtocol };
+}
+
+export async function createTask(commandProtocol: CommandProtocol) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command_protocol: commandProtocol })
+  });
+  if (!response.ok) {
+    throw new Error("任务创建失败。");
+  }
+  return (await response.json()) as {
+    task_id: string;
+    status: string;
+    task: Task;
+  };
+}
+
+export async function confirmTask(taskId: string, comment?: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment })
+  });
+  if (!response.ok) {
+    throw new Error("任务确认失败。");
+  }
+  return (await response.json()) as { task_id: string; status: string };
+}
+
+export async function startTask(taskId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/start`, {
+    method: "POST"
+  });
+  if (!response.ok) {
+    throw new Error("任务启动失败。");
+  }
+  return (await response.json()) as { task_id: string; status: string };
+}
+
+export async function listTasks() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取任务中心。");
+  }
+  return (await response.json()) as { items: Task[]; total: number };
+}
+
+export async function getTask(taskId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取任务详情。");
+  }
+  return (await response.json()) as { task: Task; events: TaskEvent[] };
+}
+
+export async function listDocuments() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取知识库文档。");
+  }
+  return (await response.json()) as { items: DocumentItem[]; total: number };
+}
+
+export async function searchKnowledge(query: string, topK = 5) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/knowledge/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, top_k: topK })
+  });
+  if (!response.ok) {
+    throw new Error("知识库检索失败。");
+  }
+  return (await response.json()) as {
+    answerable: boolean;
+    query: string;
+    chunks: Array<{
+      chunk_id: string;
+      document_id: string;
+      document_name: string;
+      page_start: number;
+      page_end: number;
+      score: number;
+      excerpt: string;
+    }>;
+  };
 }
 
 export async function getMe(token?: string | null) {
@@ -85,4 +257,3 @@ export async function getSeedStatus() {
     demo_login: { email: string; password: string };
   };
 }
-
