@@ -8,6 +8,7 @@ import {
   Sparkles
 } from "lucide-react";
 import { agents, navItems, stats, taskFields, timeline } from "@/lib/demo-data";
+import { WorkspaceStatus } from "@/components/workspace-status";
 
 const command =
   "帮我准备明天下午给华星科技的合作方案，让销售小张补充预算，销售助理生成话术，内容助理生成PPT大纲。";
@@ -52,13 +53,16 @@ export default function WorkbenchPage() {
                 老板一句话，六个数字员工与真人员工协同完成真实任务
               </p>
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <span className="rounded-md border border-line px-3 py-1 text-slate-600">
-                飞书已选
-              </span>
-              <span className="rounded-md bg-[#e9f6f5] px-3 py-1 text-accent">
-                3个真执行Agent
-              </span>
+            <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+              <WorkspaceStatus />
+              <div className="flex items-center gap-3">
+                <span className="rounded-md border border-line px-3 py-1 text-slate-600">
+                  飞书已选
+                </span>
+                <span className="rounded-md bg-[#e9f6f5] px-3 py-1 text-accent">
+                  3个真执行Agent
+                </span>
+              </div>
             </div>
           </header>
 

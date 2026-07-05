@@ -18,7 +18,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.app_base_url, "http://localhost:3000"],
+    allow_origins=[
+        settings.app_base_url,
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,4 +45,3 @@ app.include_router(knowledge_router, prefix="/api/v1", tags=["knowledge"])
 app.include_router(
     feishu_router, prefix="/api/v1/integrations/feishu", tags=["feishu"]
 )
-

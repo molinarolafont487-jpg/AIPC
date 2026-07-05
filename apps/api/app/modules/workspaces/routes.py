@@ -1,6 +1,14 @@
 from fastapi import APIRouter
 
-from app.core.demo_store import ADMIN_USER_ID, users, workspace
+from app.core.demo_store import (
+    ADMIN_USER_ID,
+    agents,
+    permissions,
+    roles,
+    users,
+    workspace,
+    workspace_members,
+)
 
 router = APIRouter()
 
@@ -8,23 +16,20 @@ router = APIRouter()
 @router.get("/me")
 def me() -> dict:
     user = users[ADMIN_USER_ID]
+    role = roles[user["role_id"]]
+    member = next(
+        item for item in workspace_members.values() if item["user_id"] == user["id"]
+    )
     return {
         "user": {
             "id": user["id"],
             "email": user["email"],
             "name": user["name"],
-            "role": user["role"],
+            "role": role,
+            "membership": member,
         },
         "workspace": workspace,
-        "permissions": [
-            "workspace:read",
-            "agents:run",
-            "tasks:write",
-            "tasks:approve",
-            "documents:read",
-            "documents:write",
-            "integrations:write",
-        ],
+        "permissions": role["permissions"],
     }
 
 
@@ -40,3 +45,40 @@ def current_workspace() -> dict:
         },
     }
 
+
+@router.get("/workspaces/current/members")
+def current_workspace_members() -> dict:
+    return {
+        "items": [
+            {
+                **member,
+                "user": {
+                    "id": users[member["user_id"]]["id"],
+                    "email": users[member["user_id"]]["email"],
+                    "name": users[member["user_id"]]["name"],
+                },
+                "role": roles[member["role_id"]],
+            }
+            for member in workspace_members.values()
+        ],
+        "total": len(workspace_members),
+    }
+
+
+@router.get("/workspaces/current/seed")
+def current_workspace_seed() -> dict:
+    return {
+        "workspace": workspace,
+        "seeded": True,
+        "counts": {
+            "users": len(users),
+            "members": len(workspace_members),
+            "roles": len(roles),
+            "permissions": len(permissions),
+            "agents": len(agents),
+        },
+        "demo_login": {
+            "email": "admin@phantom.local",
+            "password": "phantom123",
+        },
+    }

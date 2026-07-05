@@ -8,6 +8,60 @@ from app.core.security import hash_password
 
 WORKSPACE_ID = "wks_demo"
 ADMIN_USER_ID = "usr_admin"
+OWNER_ROLE_ID = "rol_owner"
+
+permissions = [
+    "workspace:read",
+    "workspace:update",
+    "users:read",
+    "users:write",
+    "roles:read",
+    "roles:write",
+    "agents:read",
+    "agents:run",
+    "tasks:read",
+    "tasks:write",
+    "tasks:approve",
+    "documents:read",
+    "documents:write",
+    "integrations:read",
+    "integrations:write",
+    "audit:read",
+    "settings:update",
+]
+
+roles: dict[str, dict[str, Any]] = {
+    OWNER_ROLE_ID: {
+        "id": OWNER_ROLE_ID,
+        "workspace_id": WORKSPACE_ID,
+        "key": "owner",
+        "name": "Owner",
+        "permissions": permissions,
+    },
+    "rol_manager": {
+        "id": "rol_manager",
+        "workspace_id": WORKSPACE_ID,
+        "key": "manager",
+        "name": "Manager",
+        "permissions": [
+            "workspace:read",
+            "agents:read",
+            "agents:run",
+            "tasks:read",
+            "tasks:write",
+            "tasks:approve",
+            "documents:read",
+            "documents:write",
+        ],
+    },
+    "rol_member": {
+        "id": "rol_member",
+        "workspace_id": WORKSPACE_ID,
+        "key": "member",
+        "name": "Member",
+        "permissions": ["workspace:read", "tasks:read", "documents:read"],
+    },
+}
 
 users: dict[str, dict[str, Any]] = {
     ADMIN_USER_ID: {
@@ -16,7 +70,7 @@ users: dict[str, dict[str, Any]] = {
         "name": "Phantom Admin",
         "password_hash": hash_password("phantom123"),
         "workspace_id": WORKSPACE_ID,
-        "role": "owner",
+        "role_id": OWNER_ROLE_ID,
         "feishu_user_id": "ou_demo_xiaozhang",
     }
 }
@@ -26,6 +80,18 @@ workspace = {
     "name": "Phantom Demo Workspace",
     "slug": "phantom-demo",
     "plan": "local-mvp",
+}
+
+workspace_members: dict[str, dict[str, Any]] = {
+    "mem_admin": {
+        "id": "mem_admin",
+        "workspace_id": WORKSPACE_ID,
+        "user_id": ADMIN_USER_ID,
+        "role_id": OWNER_ROLE_ID,
+        "display_name": "Phantom Admin",
+        "feishu_user_id": "ou_demo_xiaozhang",
+        "status": "active",
+    }
 }
 
 agents = [
@@ -115,4 +181,3 @@ def add_task_event(
     }
     task_events.setdefault(task_id, []).append(event)
     return event
-
