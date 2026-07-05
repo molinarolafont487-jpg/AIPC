@@ -161,6 +161,16 @@ export type FeishuStatus = {
   };
 };
 
+export type GoldenDemoLoopResponse = {
+  task_id: string;
+  status: string;
+  task: Task;
+  events: TaskEvent[];
+  agent_runs: AgentRun[];
+  feishu_messages: FeishuMessage[];
+  command_input: string;
+};
+
 export type DocumentItem = {
   id: string;
   workspace_id?: string;
@@ -340,6 +350,23 @@ export async function archiveTask(taskId: string) {
     throw new Error("任务归档失败。");
   }
   return (await response.json()) as { task_id: string; status: string };
+}
+
+export async function runGoldenDemoLoop(payload?: {
+  command?: string;
+  human_reply?: string;
+  notify_real_feishu?: boolean;
+  auto_archive?: boolean;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/demo/golden-loop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload ?? {})
+  });
+  if (!response.ok) {
+    throw new Error("黄金Demo执行失败。");
+  }
+  return (await response.json()) as GoldenDemoLoopResponse;
 }
 
 export async function listTasks() {

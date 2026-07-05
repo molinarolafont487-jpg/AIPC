@@ -59,6 +59,13 @@ FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-tok
 
 未配置时，任务中心的“发送补充请求”和“模拟小张回复并回流”仍可完整演示任务状态、消息审计和 Agent 继续执行。
 
+任务中心提供“跑完整Demo”入口，可一键执行黄金链路：
+
+```text
+生成任务卡 -> 关联知识库 -> 启动数字员工 -> 飞书模拟发送
+-> 小张回复回流 -> 老板确认 -> 任务归档
+```
+
 ## 7天MVP文档
 
 - [7天MVP规格说明](docs/phantom-ai-workstation/01-spec-7day-mvp.md)

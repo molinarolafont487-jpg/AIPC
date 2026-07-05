@@ -9,6 +9,7 @@ import {
   MessageCircle,
   Play,
   RefreshCcw,
+  Rocket,
   Send
 } from "lucide-react";
 import {
@@ -17,6 +18,7 @@ import {
   dispatchTaskAgents,
   getTask,
   listTasks,
+  runGoldenDemoLoop,
   sendFeishuMessage,
   simulateFeishuReply,
   type AgentRun,
@@ -44,6 +46,7 @@ export function TasksPanel() {
   const [runningAgents, setRunningAgents] = useState(false);
   const [feishuLoading, setFeishuLoading] = useState(false);
   const [closingTask, setClosingTask] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [approvalComment, setApprovalComment] = useState(
     "老板确认：预算信息已补充，客户方案可以作为演示结果归档。"
   );
@@ -178,6 +181,25 @@ export function TasksPanel() {
     }
   }
 
+  async function handleRunGoldenDemo() {
+    setDemoLoading(true);
+    setMessage("正在跑完整黄金Demo闭环...");
+    try {
+      const result = await runGoldenDemoLoop({ auto_archive: true });
+      setSelectedTask(result.task);
+      setEvents(result.events);
+      setAgentRuns(result.agent_runs);
+      await refreshTaskList();
+      setMessage(
+        `黄金Demo已完成：${statusLabels[result.status] || result.status}，已生成完整任务时间线。`
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "黄金Demo执行失败。");
+    } finally {
+      setDemoLoading(false);
+    }
+  }
+
   const canApprove =
     selectedTask !== null && selectedTask.status !== "completed" && selectedTask.status !== "archived";
   const canArchive = selectedTask?.status === "completed";
@@ -199,18 +221,28 @@ export function TasksPanel() {
   return (
     <div className="grid gap-5 p-5 xl:grid-cols-[420px_1fr]">
       <section className="rounded-lg border border-line bg-white p-5">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold">任务列表</h2>
             <p className="text-sm text-slate-500">{message}</p>
           </div>
-          <button
-            className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700"
-            onClick={() => void loadTasks()}
-          >
-            <RefreshCcw size={15} />
-            刷新
-          </button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button
+              className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={demoLoading}
+              onClick={() => void handleRunGoldenDemo()}
+            >
+              <Rocket size={15} />
+              {demoLoading ? "执行中" : "跑完整Demo"}
+            </button>
+            <button
+              className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm text-slate-700"
+              onClick={() => void loadTasks()}
+            >
+              <RefreshCcw size={15} />
+              刷新
+            </button>
+          </div>
         </div>
 
         <div className="space-y-3">
