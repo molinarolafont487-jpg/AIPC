@@ -52,6 +52,18 @@ export type CommandProtocol = {
   archive_location: string;
 };
 
+export type RoutingRules = Record<
+  string,
+  {
+    primary_agent: string;
+    collaborating_agents: string[];
+    input_sources: string[];
+    expected_outputs: string[];
+    risk_level: "low" | "medium" | "high";
+    keywords: string[];
+  }
+>;
+
 export type Agent = {
   id: string;
   key: string;
@@ -132,6 +144,28 @@ export async function parseCommand(input: string) {
   return (await response.json()) as { command_protocol: CommandProtocol };
 }
 
+export async function getRoutingRules() {
+  const response = await fetch(`${API_BASE_URL}/api/v1/commands/routing-rules`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取任务类型路由规则。");
+  }
+  return (await response.json()) as { items: RoutingRules };
+}
+
+export async function routeCommand(commandProtocol: CommandProtocol) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/commands/route`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command_protocol: commandProtocol })
+  });
+  if (!response.ok) {
+    throw new Error("任务路由失败。");
+  }
+  return (await response.json()) as { command_protocol: CommandProtocol };
+}
+
 export async function createTask(commandProtocol: CommandProtocol) {
   const response = await fetch(`${API_BASE_URL}/api/v1/tasks`, {
     method: "POST",
@@ -140,6 +174,25 @@ export async function createTask(commandProtocol: CommandProtocol) {
   });
   if (!response.ok) {
     throw new Error("任务创建失败。");
+  }
+  return (await response.json()) as {
+    task_id: string;
+    status: string;
+    task: Task;
+  };
+}
+
+export async function updateTaskProtocol(
+  taskId: string,
+  commandProtocol: CommandProtocol
+) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/tasks/${taskId}/command-protocol`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command_protocol: commandProtocol })
+  });
+  if (!response.ok) {
+    throw new Error("任务卡保存失败。");
   }
   return (await response.json()) as {
     task_id: string;

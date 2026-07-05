@@ -13,8 +13,11 @@ import {
 import {
   confirmTask,
   createTask,
+  getRoutingRules,
   parseCommand,
+  routeCommand,
   startTask,
+  updateTaskProtocol,
   type CommandProtocol
 } from "@/lib/api-client";
 import { agents, stats, timeline } from "@/lib/demo-data";
@@ -41,18 +44,32 @@ const statusLabels: Record<string, string> = {
   archived: "已归档"
 };
 
-function protocolRows(protocol: CommandProtocol) {
-  return [
-    ["任务名称", protocol.task_title],
-    ["任务类型", protocol.task_type],
-    ["主责数字员工", protocol.primary_agent],
-    ["协作数字员工", protocol.collaborating_agents.join("、")],
-    ["协作真人员工", protocol.human_collaborators.join("、") || "暂无"],
-    ["需要调用资料", protocol.input_sources.join("、")],
-    ["预计输出", protocol.expected_outputs.join("、")],
-    ["通知渠道", protocol.notification_channel],
-    ["老板确认", protocol.approval_required ? "需要" : "不需要"]
-  ];
+const taskTypes = [
+  "经营汇总",
+  "任务拆解",
+  "客户跟进",
+  "资料检索",
+  "内容生成",
+  "代码原型",
+  "会议纪要",
+  "多员工协同"
+] as const;
+
+const riskOptions = [
+  ["low", "低"],
+  ["medium", "中"],
+  ["high", "高"]
+] as const;
+
+function textToList(value: string) {
+  return value
+    .split(/[、,，\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function listToText(value: string[]) {
+  return value.join("、");
 }
 
 export function CommandCenter() {
@@ -61,9 +78,21 @@ export function CommandCenter() {
   const [taskId, setTaskId] = useState<string | null>(null);
   const [taskStatus, setTaskStatus] = useState("待生成");
   const [message, setMessage] = useState("输入一句话后生成任务卡。");
+  const [routingMessage, setRoutingMessage] =
+    useState("任务类型会决定主责Agent、协作Agent和默认输出。");
   const [loading, setLoading] = useState(false);
 
-  const rows = useMemo(() => (protocol ? protocolRows(protocol) : []), [protocol]);
+  const taskTypeHelp = useMemo(() => {
+    if (!protocol) return "";
+    return `${protocol.task_type} -> ${protocol.primary_agent}`;
+  }, [protocol]);
+
+  function updateProtocol(patch: Partial<CommandProtocol>) {
+    setProtocol((current) => (current ? { ...current, ...patch } : current));
+    setTaskStatus((current) =>
+      current === "waiting_human" || current === "running" ? current : "待确认"
+    );
+  }
 
   async function handleParse() {
     setLoading(true);
@@ -76,6 +105,55 @@ export function CommandCenter() {
       setMessage("任务卡已生成，可以确认执行。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "解析失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleApplyRouting() {
+    if (!protocol) return;
+    setLoading(true);
+    setRoutingMessage("正在按任务类型重新路由...");
+    try {
+      const result = await routeCommand(protocol);
+      setProtocol(result.command_protocol);
+      setRoutingMessage(
+        `${result.command_protocol.task_type} 已路由到 ${result.command_protocol.primary_agent}。`
+      );
+    } catch (error) {
+      setRoutingMessage(error instanceof Error ? error.message : "路由失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSaveProtocol() {
+    if (!protocol || !taskId) return;
+    setLoading(true);
+    setMessage("正在保存任务卡修改...");
+    try {
+      const result = await updateTaskProtocol(taskId, protocol);
+      setProtocol(result.task.command_protocol);
+      setTaskStatus(result.status);
+      setMessage("任务卡修改已保存到任务中心。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存失败。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLoadRoutingRules() {
+    setLoading(true);
+    setRoutingMessage("正在读取路由规则...");
+    try {
+      const result = await getRoutingRules();
+      const summary = Object.entries(result.items)
+        .map(([taskType, rule]) => `${taskType}:${rule.primary_agent}`)
+        .join(" / ");
+      setRoutingMessage(summary);
+    } catch (error) {
+      setRoutingMessage(error instanceof Error ? error.message : "读取规则失败。");
     } finally {
       setLoading(false);
     }
@@ -202,12 +280,126 @@ export function CommandCenter() {
 
           {protocol ? (
             <div className="space-y-3">
-              {rows.map(([label, value]) => (
-                <div className="grid grid-cols-[88px_1fr] gap-3 text-sm" key={label}>
-                  <div className="text-xs text-slate-500">{label}</div>
-                  <div className="leading-5 text-slate-700">{value}</div>
-                </div>
+              <label className="block">
+                <span className="text-xs text-slate-500">任务名称</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                  value={protocol.task_title}
+                  onChange={(event) =>
+                    updateProtocol({ task_title: event.target.value })
+                  }
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs text-slate-500">任务目标</span>
+                <textarea
+                  className="mt-1 min-h-20 w-full resize-none rounded-md border border-line px-3 py-2 text-sm leading-6 outline-none focus:border-accent"
+                  value={protocol.task_goal}
+                  onChange={(event) =>
+                    updateProtocol({ task_goal: event.target.value })
+                  }
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-xs text-slate-500">任务类型</span>
+                  <select
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                    value={protocol.task_type}
+                    onChange={(event) =>
+                      updateProtocol({
+                        task_type: event.target.value as CommandProtocol["task_type"]
+                      })
+                    }
+                  >
+                    {taskTypes.map((taskType) => (
+                      <option key={taskType} value={taskType}>
+                        {taskType}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs text-slate-500">风险等级</span>
+                  <select
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                    value={protocol.risk_level}
+                    onChange={(event) =>
+                      updateProtocol({
+                        risk_level: event.target.value as CommandProtocol["risk_level"]
+                      })
+                    }
+                  >
+                    {riskOptions.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="text-xs text-slate-500">主责数字员工</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                  value={protocol.primary_agent}
+                  onChange={(event) =>
+                    updateProtocol({ primary_agent: event.target.value })
+                  }
+                />
+              </label>
+
+              {[
+                ["协作数字员工", "collaborating_agents"],
+                ["协作真人员工", "human_collaborators"],
+                ["需要调用资料", "input_sources"],
+                ["预计输出", "expected_outputs"]
+              ].map(([label, key]) => (
+                <label className="block" key={key}>
+                  <span className="text-xs text-slate-500">{label}</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                    value={listToText(protocol[key as keyof CommandProtocol] as string[])}
+                    onChange={(event) =>
+                      updateProtocol({
+                        [key]: textToList(event.target.value)
+                      } as Partial<CommandProtocol>)
+                    }
+                  />
+                </label>
               ))}
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-xs text-slate-500">截止时间</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2 text-sm outline-none focus:border-accent"
+                    value={protocol.deadline}
+                    onChange={(event) =>
+                      updateProtocol({ deadline: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="flex items-end gap-2 pb-2 text-sm text-slate-700">
+                  <input
+                    checked={protocol.approval_required}
+                    onChange={(event) =>
+                      updateProtocol({ approval_required: event.target.checked })
+                    }
+                    type="checkbox"
+                  />
+                  需要老板确认
+                </label>
+              </div>
+
+              <div className="rounded-md bg-mist p-3 text-xs leading-5 text-slate-600">
+                <div>当前路由：{taskTypeHelp}</div>
+                <div>{routingMessage}</div>
+              </div>
             </div>
           ) : (
             <div className="rounded-md bg-mist p-4 text-sm leading-6 text-slate-600">
@@ -224,6 +416,20 @@ export function CommandCenter() {
               确认执行
               <ArrowRight size={15} />
             </button>
+            <button
+              className="rounded-md border border-line px-3 py-2 text-sm text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!protocol || loading}
+              onClick={handleApplyRouting}
+            >
+              应用路由
+            </button>
+            <button
+              className="rounded-md border border-line px-3 py-2 text-sm text-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!protocol || !taskId || loading}
+              onClick={handleSaveProtocol}
+            >
+              保存修改
+            </button>
             <Link
               className="rounded-md border border-line px-3 py-2 text-center text-sm text-slate-600"
               href="/tasks"
@@ -231,6 +437,12 @@ export function CommandCenter() {
               查看任务中心
             </Link>
           </div>
+          <button
+            className="mt-2 w-full rounded-md border border-line px-3 py-2 text-sm text-slate-600"
+            onClick={handleLoadRoutingRules}
+          >
+            查看任务类型路由规则
+          </button>
 
           <p className="mt-4 rounded-md bg-mist px-3 py-2 text-xs leading-5 text-slate-600">
             {message}

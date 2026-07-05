@@ -11,12 +11,17 @@ from app.core.demo_store import (
     tasks,
     utc_now,
 )
+from app.core.schemas import CommandProtocol
 
 router = APIRouter()
 
 
 class CreateTaskRequest(BaseModel):
-    command_protocol: dict
+    command_protocol: CommandProtocol
+
+
+class UpdateTaskProtocolRequest(BaseModel):
+    command_protocol: CommandProtocol
 
 
 class DecisionRequest(BaseModel):
@@ -30,7 +35,7 @@ def find_agent_id_by_name(name: str) -> str | None:
 
 @router.post("")
 def create_task(payload: CreateTaskRequest) -> dict:
-    protocol = payload.command_protocol
+    protocol = payload.command_protocol.as_task_payload()
     task_id = new_id("tsk")
     task = {
         "id": task_id,
@@ -62,6 +67,26 @@ def get_task(task_id: str) -> dict:
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"task": task, "events": task_events.get(task_id, [])}
+
+
+@router.patch("/{task_id}/command-protocol")
+def update_task_protocol(task_id: str, payload: UpdateTaskProtocolRequest) -> dict:
+    task = tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task["status"] not in {"pending_confirm", "running", "waiting_human"}:
+        raise HTTPException(status_code=409, detail="Task can no longer be edited")
+
+    protocol = payload.command_protocol.as_task_payload()
+    task["title"] = protocol["task_title"]
+    task["goal"] = protocol["task_goal"]
+    task["type"] = protocol["task_type"]
+    task["command_protocol"] = protocol
+    task["primary_agent_id"] = find_agent_id_by_name(protocol["primary_agent"])
+    task["approval_required"] = protocol["approval_required"]
+    task["updated_at"] = utc_now()
+    add_task_event(task_id, "task.updated", "任务卡字段已修改。", actor_type="user")
+    return {"task_id": task_id, "status": task["status"], "task": task}
 
 
 @router.post("/{task_id}/confirm")
@@ -125,4 +150,3 @@ def timeline(task_id: str) -> dict:
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"events": task_events.get(task_id, [])}
-
