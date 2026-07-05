@@ -99,10 +99,27 @@ export type TaskEvent = {
 
 export type DocumentItem = {
   id: string;
+  workspace_id?: string;
   name: string;
   file_type: string;
+  dataset?: string;
   parse_status: string;
   chunk_count: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string;
+};
+
+export type DocumentChunk = {
+  id: string;
+  document_id: string;
+  document_name: string;
+  chunk_index: number;
+  content: string;
+  page_start: number;
+  page_end: number;
+  token_count: number;
+  metadata: Record<string, unknown>;
   created_at: string;
 };
 
@@ -253,11 +270,59 @@ export async function listDocuments() {
   return (await response.json()) as { items: DocumentItem[]; total: number };
 }
 
-export async function searchKnowledge(query: string, topK = 5) {
+export async function createDocument(payload: {
+  filename: string;
+  file_type: string;
+  dataset: string;
+  content: string;
+  auto_ingest?: boolean;
+}) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error("文档入库失败。");
+  }
+  return (await response.json()) as { document: DocumentItem };
+}
+
+export async function seedDemoDocuments(reset = true) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/seed-demo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reset })
+  });
+  if (!response.ok) {
+    throw new Error("Demo数据初始化失败。");
+  }
+  return (await response.json()) as {
+    created: DocumentItem[];
+    document_count: number;
+    chunk_count: number;
+  };
+}
+
+export async function listDocumentChunks(documentId: string) {
+  const response = await fetch(`${API_BASE_URL}/api/v1/documents/${documentId}/chunks`, {
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error("无法读取文档分片。");
+  }
+  return (await response.json()) as { items: DocumentChunk[]; total: number };
+}
+
+export async function searchKnowledge(
+  query: string,
+  topK = 5,
+  filters?: { dataset?: string }
+) {
   const response = await fetch(`${API_BASE_URL}/api/v1/knowledge/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, top_k: topK })
+    body: JSON.stringify({ query, top_k: topK, filters })
   });
   if (!response.ok) {
     throw new Error("知识库检索失败。");
